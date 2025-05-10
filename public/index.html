@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ZeroCoder - AI Web Generator</title>
+  <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/editor/editor.main.css">
+  <style>
+    :root {
+      --bg-color: #1a1a2e; /* Dark blue-purple */
+      --panel-bg: #16213e; /* Darker blue */
+      --text-color: #e0e1dd; /* Light grey/off-white */
+      --primary-accent: #0f3460; /* Darker accent for buttons */
+      --secondary-accent: #537895; /* Lighter accent / glassmorphism hint */
+      --border-color: #4a4a58; /* Muted border */
+      --glass-bg: rgba(255, 255, 255, 0.05); /* Glassmorphism background */
+      --glass-blur: 10px;
+      --loader-dot-color: #e0e1dd; /* Light color for loader dots */
+    }
+
+    body, html { 
+      margin: 0; padding: 0; height: 100%; overflow: hidden; 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+    }
+    .container { display: flex; height: 100vh; }
+    .left-panel { 
+      width: 50%; padding: 20px; display: flex; flex-direction: column; 
+      box-sizing: border-box; 
+      background-color: var(--panel-bg);
+      border-right: 1px solid var(--border-color); 
+    }
+    .right-panel { width: 50%; height: 100%; background-color: #fff; /* Preview area often white by default */ }
+    
+    #prompt { 
+      width: calc(100% - 22px); margin-bottom: 10px; padding: 10px; 
+      border: 1px solid var(--border-color); border-radius: 4px; box-sizing: border-box;
+      background-color: #2c3e50; /* Darker input field */
+      color: var(--text-color);
+      font-size: 1em;
+    }
+    button { 
+      padding: 10px 18px; margin-bottom: 10px; 
+      background-color: var(--primary-accent); 
+      color: var(--text-color); 
+      border: none; border-radius: 5px; cursor: pointer;
+      transition: background-color 0.3s ease;
+      font-weight: bold;
+    }
+    button:hover { background-color: var(--secondary-accent); }
+    
+    #editor-container { 
+      flex-grow: 1; 
+      border: 1px solid var(--border-color); 
+      border-radius: 4px; 
+      /* Monaco editor will use its own theme (vs-dark) */
+    }
+    #preview { width: 100%; height: 100%; border: none; }
+
+    /* API Key Section Styles - Glassmorphism */
+    #api-key-section { 
+      padding: 15px; margin-bottom: 20px; 
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur)); /* For Safari */
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px; 
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    }
+    #api-key-section label { margin-right: 8px; font-weight: bold; color: var(--text-color); }
+    #apiKeyInput { 
+      padding: 8px 10px; 
+      border: 1px solid var(--border-color); 
+      border-radius: 4px; 
+      min-width: 300px; margin-right: 8px;
+      background-color: rgba(0,0,0,0.2); /* Darker transparent */
+      color: var(--text-color);
+    }
+    .api-key-buttons button { 
+      padding: 8px 12px; margin-left: 5px; font-size: 0.9em;
+      background-color: var(--secondary-accent); /* Different button color for this section */
+    }
+    .api-key-buttons button:hover { background-color: var(--primary-accent); }
+    .api-key-info { margin-top:10px; font-size: 0.9em; color: #bbb; /* Lighter grey for info text */ }
+    #apiKeyStatus { color: #a0a0a0; }
+
+    /* Action Buttons Container */
+    .action-buttons-container {
+      display: flex;
+      justify-content: flex-start; /* Align to start, or space-around for more spread */
+      gap: 10px; /* Space between buttons */
+      margin-bottom: 15px; /* Space below the button row */
+    }
+    .action-buttons-container button {
+      margin-bottom: 0; /* Remove default bottom margin for buttons in this container */
+      padding: 10px 15px; /* Slightly adjusted padding */
+      display: flex; /* To align icon and text */
+      align-items: center;
+      justify-content: center;
+      flex-grow: 1; /* Make buttons share space, or remove for natural width */
+    }
+    .action-buttons-container button .icon {
+      margin-right: 8px; /* Space between icon and text */
+      font-size: 1.1em; /* Slightly larger icon */
+    }
+    /* Specific button styling if needed - using IDs for example */
+    #generateBtn { background-color: var(--primary-accent); }
+    #downloadBtn { background-color: #28a745; } /* Keep green for download */
+    #previewBtn { background-color: #17a2b8; } /* Keep teal for preview */
+
+
+    /* Loader Styles - Horizontal Bar */
+    .loader-container {
+      text-align: center;
+      margin: 20px 0; /* Increased margin */
+      display: none; /* Hidden by default */
+    }
+    .loader-bar {
+      width: 80%; /* Or a fixed width like 200px */
+      height: 8px;
+      background-color: var(--border-color); /* Background of the bar track */
+      border-radius: 4px;
+      margin: 0 auto 10px auto; /* Center bar, margin for message */
+      overflow: hidden;
+      position: relative;
+    }
+    .loader-bar::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 0%;
+      background-color: var(--loader-dot-color); /* Active part of bar, using themed color */
+      border-radius: 4px;
+      animation: loading-bar 2s linear infinite;
+    }
+    .loader-message {
+      font-size: 0.9em;
+      color: var(--text-color);
+      opacity: 0.8;
+    }
+
+    @keyframes loading-bar {
+      0% { width: 0%; }
+      50% { width: 100%; }
+      100% { width: 0%; left: 100%;} /* Bar slides out */
+    }
+    /* Fallback for browsers that might not support complex animation well, or just a simpler version */
+    /* @keyframes loading-bar { 0% { width: 0%; } 100% { width: 100%; } } */
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="left-panel">
+      <div id="api-key-section">
+        <div>
+          <label for="apiKeyInput">Gemini API Key:</label>
+          <input type="password" id="apiKeyInput" placeholder="Enter your Gemini API Key">
+        </div>
+        <div class="api-key-buttons" style="margin-top: 5px;">
+          <button onclick="saveApiKey()">Save Key</button>
+          <button onclick="clearApiKey()">Clear/Edit Key</button>
+        </div>
+        <div id="apiKeyStatus" style="margin-top: 5px; font-style: italic;"></div>
+        <div class="api-key-info">
+          You can get your Gemini API key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>.
+        </div>
+      </div>
+
+      <textarea id="prompt" rows="5" placeholder="Describe your website idea..."></textarea>
+      <div class="action-buttons-container">
+        <button onclick="sendPrompt()" id="generateBtn"><span class="icon">✨</span> Generate</button>
+        <button onclick="downloadHtml()" id="downloadBtn"><span class="icon">💾</span> Download HTML</button>
+        <button onclick="previewInNewTab()" id="previewBtn"><span class="icon">👁️</span> Preview in New Tab</button>
+      </div>
+      <div id="loaderContainer" class="loader-container">
+        <div class="loader-bar"></div>
+        <div class="loader-message">Sit back and relax while we generate your full site. This may take a few seconds to a minute.</div>
+      </div>
+      <div id="editor-container" style="margin-top: 10px;"></div>
+    </div>
+    <div class="right-panel">
+      <iframe id="preview"></iframe>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/loader.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/preview.js"></script>
+  <script>
+    let editor;
+    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs' }});
+    require(['vs/editor/editor.main'], function() {
+      loadApiKey(); // Load API key on init
+
+      editor = monaco.editor.create(document.getElementById('editor-container'), {
+        value: '',
+        language: 'html',
+        theme: 'vs-dark',
+        automaticLayout: true
+      });
+
+      // Link editor to preview
+      editor.onDidChangeModelContent(() => {
+        updatePreview(editor.getValue());
+      });
+    });
+
+    async function sendPrompt() {
+      console.log("sendPrompt() called"); // DEBUG LOG
+
+      const apiKey = document.getElementById('apiKeyInput').value;
+      if (!apiKey || !apiKey.trim()) {
+        alert('Please enter and save your Gemini API Key first.');
+        document.getElementById('apiKeyInput').focus();
+        return;
+      }
+
+      const userPrompt = document.getElementById('prompt').value;
+      if (!userPrompt.trim()) {
+        console.log("Prompt is empty, alerting user."); // DEBUG LOG
+        alert('Please enter a prompt.');
+        return;
+      }
+      
+      const generateButton = document.querySelector('button[onclick="sendPrompt()"]');
+      if (!generateButton) {
+        console.error("Generate button not found!"); // DEBUG LOG
+        return;
+      }
+      
+      generateButton.disabled = true;
+      generateButton.textContent = 'Generating...';
+      document.getElementById('loaderContainer').style.display = 'block'; 
+      document.getElementById('api-key-section').style.display = 'none'; // Hide API key section
+      
+      if (editor) {
+        editor.setValue(''); 
+      } else {
+        console.error("Monaco editor (variable 'editor') is not initialized!");
+      }
+
+      console.log("About to create EventSource for prompt:", userPrompt); // DEBUG LOG
+      const eventSource = new EventSource(`/generate?prompt=${encodeURIComponent(userPrompt)}&apiKey=${encodeURIComponent(apiKey)}`);
+      let fullHtmlContent = '';
+
+      eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        if (data.htmlChunk) {
+          fullHtmlContent += data.htmlChunk;
+          // It's often better to set the full value to avoid performance issues with many small appends
+          // However, for live typing effect, appending might be desired.
+          // Let's try setting full value for robustness with Monaco.
+          editor.setValue(fullHtmlContent);
+        } else if (data.error) {
+          console.error('Error from server stream:', data.error);
+          editor.setValue(editor.getValue() + `\n<!-- Server Error: ${data.error} -->`);
+          eventSource.close();
+          enableGenerateButton();
+        } else if (data.event === "EOS") {
+          console.log("End of stream received.");
+          eventSource.close();
+          enableGenerateButton();
+        }
+      };
+
+      eventSource.onerror = function(err) {
+        console.error('EventSource failed:', err);
+        editor.setValue(editor.getValue() + `\n<!-- Streaming connection error. Please try again. -->`);
+        eventSource.close();
+        enableGenerateButton();
+      };
+    }
+
+    function enableGenerateButton() {
+      const generateButton = document.querySelector('button[onclick="sendPrompt()"]'); 
+      if (generateButton) {
+        generateButton.disabled = false;
+        generateButton.textContent = 'Generate';
+      }
+      document.getElementById('loaderContainer').style.display = 'none';
+      document.getElementById('api-key-section').style.display = 'block'; // Show API key section
+    }
+
+    function previewInNewTab() {
+      if (!editor) {
+        alert('Editor not initialized yet.');
+        return;
+      }
+      const htmlContent = editor.getValue();
+      if (!htmlContent.trim()) {
+        alert('Nothing to preview. Generate some HTML first.');
+        return;
+      }
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // URLs created by createObjectURL should be revoked when no longer needed
+      // For a new tab, it's tricky; the browser revokes it when the document is unloaded.
+      // Or, could revoke after a delay, assuming tab has loaded: setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+
+    function downloadHtml() {
+      if (!editor) {
+        alert('Editor not initialized yet.');
+        return;
+      }
+      const htmlContent = editor.getValue();
+      if (!htmlContent.trim()) {
+        alert('Nothing to download. Generate some HTML first.');
+        return;
+      }
+
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'generated-page.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    }
+
+    function saveApiKey() {
+      const apiKeyInput = document.getElementById('apiKeyInput');
+      const apiKey = apiKeyInput.value.trim();
+      if (apiKey) {
+        localStorage.setItem('geminiApiKey', apiKey);
+        apiKeyInput.type = 'password'; // Keep it masked after saving
+        document.getElementById('apiKeyStatus').textContent = 'API Key saved in browser storage.';
+        console.log('API Key saved.');
+      } else {
+        alert('Please enter an API Key to save.');
+      }
+    }
+
+    function loadApiKey() {
+      const savedKey = localStorage.getItem('geminiApiKey');
+      const apiKeyInput = document.getElementById('apiKeyInput');
+      const apiKeyStatus = document.getElementById('apiKeyStatus');
+      if (savedKey) {
+        apiKeyInput.value = savedKey;
+        apiKeyInput.type = 'password';
+        apiKeyStatus.textContent = 'API Key loaded from browser storage.';
+      } else {
+        apiKeyInput.type = 'text'; // Show as text if no key yet
+        apiKeyStatus.textContent = 'No API Key found. Please enter and save one.';
+      }
+    }
+
+    function clearApiKey() {
+      const apiKeyInput = document.getElementById('apiKeyInput');
+      const apiKeyStatus = document.getElementById('apiKeyStatus');
+      localStorage.removeItem('geminiApiKey');
+      apiKeyInput.value = '';
+      apiKeyInput.type = 'text'; // Show as text for new input
+      apiKeyInput.focus();
+      apiKeyStatus.textContent = 'API Key cleared. Enter a new key and save.';
+      console.log('API Key cleared.');
+    }
+
+    // Initial load of API key when script runs (after DOM is ready for these elements)
+    // Moved loadApiKey() call to inside the require(['vs/editor/editor.main']...) block to ensure DOM is ready.
+  </script>
+</body>
+</html>
