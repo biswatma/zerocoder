@@ -16,9 +16,10 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/generate', async (req, res) => {
+// Changed route from /generate to /api/generate to match Vercel structure and updated frontend call
+app.get('/api/generate', async (req, res) => {
   console.log("\n\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-  console.log("[SERVER DEBUG] /generate ROUTE HANDLER STARTED!");
+  console.log("[SERVER DEBUG] /api/generate ROUTE HANDLER STARTED (for local server)!");
   console.log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n\n");
 
   const prompt = req.query.prompt;
