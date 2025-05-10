@@ -241,7 +241,8 @@
       }
 
       console.log("About to create EventSource for prompt:", userPrompt); // DEBUG LOG
-      const eventSource = new EventSource(`/generate?prompt=${encodeURIComponent(userPrompt)}&apiKey=${encodeURIComponent(apiKey)}`);
+      // Updated to point to /api/generate for Vercel deployment
+      const eventSource = new EventSource(`/api/generate?prompt=${encodeURIComponent(userPrompt)}&apiKey=${encodeURIComponent(apiKey)}`);
       let fullHtmlContent = '';
 
       eventSource.onmessage = function(event) {
