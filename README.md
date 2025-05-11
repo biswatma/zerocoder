@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/assets/logo.png" alt="ZeroCoder Logo" width="150">
+</p>
+
 # ZeroCoder - AI Web Generator
 
 **Try the Live Demo:**  
