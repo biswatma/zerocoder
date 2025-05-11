@@ -24,16 +24,16 @@ app.get('/api/generate', async (req, res) => {
 
   const prompt = req.query.prompt;
   const apiKey = req.query.apiKey; // Get API key from query parameter
+  const engine = req.query.engine || 'gemini'; // Default to gemini
 
   if (!prompt) {
     console.log("[SERVER DEBUG] Prompt is missing, sending 400 error.");
     return res.status(400).json({ error: "Prompt is required" });
   }
-  if (!apiKey) {
-    console.log("[SERVER DEBUG] API Key is missing, sending 400 error.");
-    // For EventSource, errors should ideally also be event streams if headers are already flushed.
-    // However, this check is before res.flushHeaders(), so a JSON error is okay.
-    return res.status(400).json({ error: "API Key is required" });
+  // API Key is only required for Gemini
+  if (engine === 'gemini' && !apiKey) {
+    console.log("[SERVER DEBUG] API Key is missing for Gemini, sending 400 error.");
+    return res.status(400).json({ error: "API Key is required for Gemini" });
   }
 
   // Set SSE headers
@@ -42,173 +42,291 @@ app.get('/api/generate', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders(); // Explicitly flush headers BEFORE the try block
 
-  try {
-    // Using the API key passed from the client
-    const geminiStreamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:streamGenerateContent?key=${apiKey}`;
-    const systemPromptText = "You are an HTML code generation engine. Your output MUST be a single, complete, valid HTML document. Start your response *directly* with `<!DOCTYPE html>`. Do NOT include any other text, explanations, summaries, markdown formatting (like ```html), or any characters whatsoever before `<!DOCTYPE html>` or after `</html>`. Only output the raw HTML code itself.";
-    
-    const geminiPayload = {
-      contents: [{ 
-        parts: [{ text: prompt }]  // User's direct prompt
-      }],
-      system_instruction: {         // Official field for system instructions
-        parts: [{ text: systemPromptText }]
-      }
-      // Potentially add generationConfig: { "response_mime_type": "text/plain" } if supported,
-      // to further discourage markdown, but this might also strip HTML tags if model misinterprets.
-      // For now, rely on prompt and server-side stripping.
-    };
+  const systemPromptText = "You are Zerocoder, an advanced HTML code generation engine. Your output MUST be a single, complete, and valid HTML document using Tailwind CSS (via CDN in the <head>). All designs must be responsive, visually appealing, and follow modern UI/UX best practices.\n\nFor any image content, if no suitable external image is available, generate SVG graphics directly within the HTML. The SVGs should be simple, clean, and vector-based to fit the content needs (e.g., icons, logos, or abstract patterns). These SVGs should be visually appropriate for the section of the site they appear in and should follow best design principles (e.g., minimalistic icons, geometric shapes, or abstract art for backgrounds).\n\nUse high-quality placeholder services like Lorem Picsum or Unsplash Source for images when necessary, but prioritize SVGs when appropriate. Do NOT include any explanatory text, markdown formatting, comments, or extra characters. Output ONLY raw HTML. Start exactly with <!DOCTYPE html> and end exactly with </html>. No text or characters are allowed before or after the HTML document—just clean, production-ready HTML.";
 
-    console.log(`[Server] Attempting to stream from Gemini with dedicated system_instruction field for prompt: "${prompt}"`);
-    const geminiResponse = await axios.post(geminiStreamUrl, geminiPayload, {
-      responseType: 'stream'
+  if (engine === 'lmstudio') {
+    const lmstudioNoThink = req.query.lmstudio_no_think === 'true';
+    let finalPrompt = prompt;
+    if (lmstudioNoThink) {
+      finalPrompt = `${prompt} /no_think`;
+      console.log(`[Server] LM Studio 'no_think' is enabled. Modified prompt: "${finalPrompt}"`);
+    } else {
+      console.log(`[Server] LM Studio 'no_think' is disabled. Original prompt: "${finalPrompt}"`);
+    }
+    console.log(`[Server] Attempting to stream from LM Studio for prompt: "${prompt}" (final to be sent: "${finalPrompt}")`);
+    const controller = new AbortController(); // Create an AbortController
+
+    res.on('close', () => {
+      console.log('[Server] Client closed connection. Aborting LM Studio request.');
+      controller.abort(); // Abort the axios request if client disconnects
     });
-    
-    // Headers should have been flushed by res.flushHeaders() above.
 
-    let jsonBuffer = ''; // Buffer for potentially incomplete JSON chunks
+    try {
+      const lmStudioUrl = process.env.LMSTUDIO_URL || 'http://localhost:1234/v1/chat/completions';
+      const lmStudioPayload = {
+        model: process.env.LMSTUDIO_MODEL || undefined, // Optional: specify model if not pre-loaded
+        messages: [
+          { role: "system", content: systemPromptText },
+          { role: "user", content: finalPrompt }
+        ],
+        stream: true
+      };
 
-    geminiResponse.data.on('data', (chunk) => {
-      jsonBuffer += chunk.toString();
-      
-      // Process buffer for complete JSON objects (Gemini stream sends an array of JSON objects)
-      // A simple way is to assume the stream is an array and try to parse it incrementally.
-      // This is still not perfect true streaming of *individual text parts* from Gemini to client,
-      // but it processes Gemini's JSON objects as they complete within the stream.
-      // The Gemini API for streamGenerateContent sends a stream of `StreamGenerateContentResponse` objects.
-      // These are typically sent one after another. We need to parse each one.
-      // A common pattern is that these JSON objects might be separated by newlines in some SDKs,
-      // but raw HTTP stream might just concatenate them.
-      // For robustness, we'd need a proper streaming JSON parser.
-      // Given the existing code structure, it expects to parse an array of responses.
-      // The simplest modification to avoid timeout is to send *something* to the client earlier.
+      const lmStudioResponse = await axios.post(lmStudioUrl, lmStudioPayload, {
+        responseType: 'stream',
+        signal: controller.signal // Pass the abort signal to axios
+      });
 
-      // Let's try to parse what we have so far as if it's the start of the array.
-      // This is a heuristic and might break if chunks are too small or malformed.
-      try {
-        // Attempt to find complete JSON objects in the buffer.
-        // Gemini stream is an array of JSON objects. Chunks might not be valid JSON alone.
-        // A more robust way would be to find `},{` boundaries or use a streaming JSON parser.
-        // For now, let's send the raw text chunk from Gemini if available in this chunk.
-        // This assumes each chunk from Gemini stream is a self-contained JSON object of StreamGenerateContentResponse
-        // which might not always be true, but is a common behavior for many streaming APIs.
-        
-        // Try to parse the current buffer as one or more JSON objects.
-        // The stream from Gemini is an array of JSON objects.
-        // We'll look for `StreamGenerateContentResponse` objects.
-        // A simple heuristic: split by '}\n{' or similar, or try to parse.
-        
-        // Let's refine: the stream is an array of JSON objects.
-        // `[ {"candidates": ...}, {"candidates": ...} ]`
-        // We need to extract each object.
-        
-        // Simplified approach: send text as it comes from any candidate part.
-        // This might send partial HTML if Gemini chunks its text output.
-        const potentialObjects = jsonBuffer.split('\n').filter(s => s.trim() !== '');
-        let processedAnyThisChunk = false;
-        potentialObjects.forEach(potentialJsonString => {
-            if (processedAnyThisChunk && !potentialJsonString.startsWith(',')) { // If it's not the first object in an array part
-                 // This logic is flawed if Gemini doesn't send comma-separated objects in chunks.
+      let buffer = '';
+      lmStudioResponse.data.on('data', (chunk) => {
+        buffer += chunk.toString();
+        let boundary;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const dataLine = buffer.substring(0, boundary);
+          buffer = buffer.substring(boundary + 2);
+          if (dataLine.startsWith('data: ')) {
+            const jsonData = dataLine.substring(6);
+            if (jsonData.trim() === '[DONE]') {
+              console.log("[Server] LM Studio stream [DONE] received.");
+              // EOS is sent after this loop or in 'end' event
+              continue; 
             }
             try {
-                // Remove leading/trailing commas if they exist from partial array processing
-                let parsableJsonString = potentialJsonString.trim();
-                if (parsableJsonString.startsWith(',')) parsableJsonString = parsableJsonString.substring(1);
-                if (parsableJsonString.endsWith(',')) parsableJsonString = parsableJsonString.slice(0, -1);
-
-                if (!parsableJsonString) return;
-
-                const responseObject = JSON.parse(parsableJsonString);
-                if (responseObject.candidates && responseObject.candidates[0] &&
-                    responseObject.candidates[0].content && responseObject.candidates[0].content.parts &&
-                    responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
-                  const textChunk = responseObject.candidates[0].content.parts[0].text;
-                  console.log("[Server] Sending text chunk to client:", textChunk.substring(0,100) + "...");
-                  res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
-                  processedAnyThisChunk = true;
-                } else if (responseObject.error) {
-                  console.error("[Server] Error object in Gemini response chunk:", responseObject.error);
-                  res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
-                  processedAnyThisChunk = true;
-                }
+              const parsed = JSON.parse(jsonData);
+              if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
+                const textChunk = parsed.choices[0].delta.content;
+                console.log("[Server] Sending LM Studio text chunk to client:", textChunk.substring(0,100) + "...");
+                res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
+              }
+              if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason === 'stop') {
+                console.log("[Server] LM Studio stream finished (finish_reason: stop).");
+                // EOS will be sent by 'end' event handler
+              }
             } catch (e) {
-                // Incomplete JSON in this part of the buffer, wait for more data
-                // console.warn("[Server] Partial JSON in buffer, waiting for more data. Error:", e.message, "Buffer part:", potentialJsonString);
+              console.warn('[Server] Error parsing LM Studio JSON chunk:', jsonData, e.message);
             }
-        });
-        if(processedAnyThisChunk) jsonBuffer = ''; // Clear buffer if we processed something
-
-      } catch (e) {
-        // This outer catch is if jsonBuffer itself is not even splittable or basic processing fails.
-        console.warn('[Server] Error processing/parsing chunk from Gemini, might be partial. Chunk:', jsonBuffer.substring(0,200));
-        // Don't send error to client yet, just buffer and wait for more.
-      }
-    });
-
-    geminiResponse.data.on('end', () => {
-      console.log("[Server] Gemini stream ended.");
-      // Process any remaining data in jsonBuffer
-      // This part is tricky because the original code expected a full array.
-      // If the above on('data') logic correctly parsed and sent all parts, jsonBuffer might be empty or contain a trailing ']'
-      // For now, we assume the on('data') has handled most things.
-      // The crucial part is that we've been sending data *during* the stream.
-      if (jsonBuffer.trim().length > 0 && jsonBuffer.trim() !== '[' && jsonBuffer.trim() !== ']') {
-          console.warn("[Server] Remaining data in buffer after stream end:", jsonBuffer);
-          // Attempt to parse any final bits, though ideally handled above.
-          // This might be redundant if the stream always ends cleanly.
-      }
-      
-      res.write('data: {"event": "EOS"}\n\n');
-      res.end();
-      console.log("[Server] Finished processing and sent EOS to client.");
-    });
-
-    geminiResponse.data.on('error', (streamError) => { // This handles errors on the stream itself
-      console.error('[Server] Error event during Gemini stream pipe:', streamError);
-      // Ensure client stream is properly terminated with an error if possible
-      if (!res.writableEnded) {
-        try {
-          res.write(`data: ${JSON.stringify({ error: streamError.message || 'Gemini stream pipe error event' })}\n\n`);
-          res.write('data: {"event": "EOS"}\n\n');
-          res.end();
-        } catch (e) {
-          console.error("[Server] Error writing error to client response after stream error:", e);
-          if (!res.writableEnded) res.end(); // Force end if write fails
+          }
         }
-      }
-    });
+      });
 
-  } catch (err) {
-    // This catch is for errors in setting up the axios request itself (e.g., network error, Gemini 4xx/5xx response)
-    console.error('[Server] Error setting up or during Gemini stream request:', err.isAxiosError ? err.message : err);
-    if (err.response && err.response.data) { // Axios error might have more details
+      lmStudioResponse.data.on('end', () => {
+        console.log("[Server] LM Studio stream ended.");
+        if (buffer.trim().length > 0) { // Process any remaining data in buffer
+            if (buffer.startsWith('data: ')) {
+                const jsonData = buffer.substring(6);
+                if (jsonData.trim() !== '[DONE]') {
+                    try {
+                        const parsed = JSON.parse(jsonData);
+                        if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
+                            const textChunk = parsed.choices[0].delta.content;
+                            console.log("[Server] Sending final LM Studio text chunk to client:", textChunk.substring(0,100) + "...");
+                            res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
+                        }
+                    } catch (e) {
+                        console.warn('[Server] Error parsing final LM Studio JSON chunk:', jsonData, e.message);
+                    }
+                }
+            }
+        }
+        res.write('data: {"event": "EOS"}\n\n');
+        res.end();
+        console.log("[Server] Finished processing LM Studio stream and sent EOS to client.");
+      });
+
+      lmStudioResponse.data.on('error', (streamError) => {
+        console.error('[Server] Error event during LM Studio stream pipe:', streamError);
+        if (!res.writableEnded) {
+          try {
+            res.write(`data: ${JSON.stringify({ error: streamError.message || 'LM Studio stream pipe error event' })}\n\n`);
+            res.write('data: {"event": "EOS"}\n\n');
+            res.end();
+          } catch (e) {
+            console.error("[Server] Error writing error to client response after LM Studio stream error:", e);
+            if (!res.writableEnded) res.end();
+          }
+        }
+      });
+
+    } catch (err) {
+      if (err.name === 'AbortError' || (axios.isCancel && axios.isCancel(err))) {
+        console.log('[Server] LM Studio request aborted by client.');
+        // Ensure the response to the client is properly ended if not already.
+        if (!res.writableEnded) {
+          res.write('data: {"event": "EOS", "reason": "aborted"}\n\n');
+          res.end();
+        }
+        return; // Stop further processing for this aborted request
+      }
+
+      console.error('[Server] Error setting up or during LM Studio stream request:', err.isAxiosError ? err.message : err);
+      let errorMessage = 'Failed to connect to LM Studio API for streaming.';
+      if (err.response && err.response.data) {
         let errorData = err.response.data;
-        if (errorData instanceof require('stream').Readable) { // If error data is a stream
+         if (errorData instanceof require('stream').Readable) {
             let chunks = [];
             errorData.on('data', chunk => chunks.push(chunk));
             errorData.on('end', () => {
                 const errorString = Buffer.concat(chunks).toString();
-                console.error("[Server] Gemini error response (streamed):", errorString);
-                // Try to parse it if it's JSON
+                console.error("[Server] LM Studio error response (streamed):", errorString);
                 try {
                     const parsedError = JSON.parse(errorString);
-                    res.write(`data: ${JSON.stringify({ error: parsedError.error ? parsedError.error.message : errorString })}\n\n`);
+                    errorMessage = parsedError.error ? (parsedError.error.message || errorString) : errorString;
                 } catch (parseErr) {
-                    res.write(`data: ${JSON.stringify({ error: errorString })}\n\n`);
+                    errorMessage = errorString;
                 }
-                res.write('data: {"event": "EOS"}\n\n');
-                res.end();
+                if (!res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+                    res.write('data: {"event": "EOS"}\n\n');
+                    res.end();
+                }
             });
             return; // Handled by stream events
         } else {
-             console.error("[Server] Gemini error response (data):", errorData);
-             res.write(`data: ${JSON.stringify({ error: (errorData.error && errorData.error.message) ? errorData.error.message : (err.message || 'Failed to connect to Gemini API for streaming.') })}\n\n`);
+            console.error("[Server] LM Studio error response (data):", errorData);
+            if (errorData.error && errorData.error.message) {
+                errorMessage = errorData.error.message;
+            } else if (typeof errorData === 'string') {
+                errorMessage = errorData;
+            } else if (err.message) {
+                errorMessage = err.message;
+            }
         }
-    } else {
-        res.write(`data: ${JSON.stringify({ error: err.message || 'Server error during stream setup.' })}\n\n`);
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+        res.write('data: {"event": "EOS"}\n\n');
+        res.end();
+      }
     }
-    res.write('data: {"event": "EOS"}\n\n'); // Ensure client knows stream is over
-    res.end();
+
+  } else { // Default to Gemini
+    try {
+      // Using the API key passed from the client
+      const geminiStreamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:streamGenerateContent?key=${apiKey}`;
+      
+      const geminiPayload = {
+        contents: [{ 
+          parts: [{ text: prompt }]  // User's direct prompt
+        }],
+        system_instruction: {         // Official field for system instructions
+          parts: [{ text: systemPromptText }]
+        }
+      };
+
+      console.log(`[Server] Attempting to stream from Gemini with dedicated system_instruction field for prompt: "${prompt}"`);
+      const geminiResponse = await axios.post(geminiStreamUrl, geminiPayload, {
+        responseType: 'stream'
+      });
+      
+      let jsonBuffer = ''; 
+
+      geminiResponse.data.on('data', (chunk) => {
+        jsonBuffer += chunk.toString();
+        try {
+          const potentialObjects = jsonBuffer.split('\n').filter(s => s.trim() !== '');
+          let processedAnyThisChunk = false;
+          potentialObjects.forEach(potentialJsonString => {
+              try {
+                  let parsableJsonString = potentialJsonString.trim();
+                  if (parsableJsonString.startsWith(',')) parsableJsonString = parsableJsonString.substring(1);
+                  if (parsableJsonString.endsWith(',')) parsableJsonString = parsableJsonString.slice(0, -1);
+
+                  if (!parsableJsonString) return;
+
+                  const responseObject = JSON.parse(parsableJsonString);
+                  if (responseObject.candidates && responseObject.candidates[0] &&
+                      responseObject.candidates[0].content && responseObject.candidates[0].content.parts &&
+                      responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
+                    const textChunk = responseObject.candidates[0].content.parts[0].text;
+                    console.log("[Server] Sending Gemini text chunk to client:", textChunk.substring(0,100) + "...");
+                    res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
+                    processedAnyThisChunk = true;
+                  } else if (responseObject.error) {
+                    console.error("[Server] Error object in Gemini response chunk:", responseObject.error);
+                    res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
+                    processedAnyThisChunk = true;
+                  }
+              } catch (e) {
+                  // Incomplete JSON in this part of the buffer, wait for more data
+              }
+          });
+          if(processedAnyThisChunk) jsonBuffer = ''; 
+
+        } catch (e) {
+          console.warn('[Server] Error processing/parsing chunk from Gemini, might be partial. Chunk:', jsonBuffer.substring(0,200));
+        }
+      });
+
+      geminiResponse.data.on('end', () => {
+        console.log("[Server] Gemini stream ended.");
+        if (jsonBuffer.trim().length > 0 && jsonBuffer.trim() !== '[' && jsonBuffer.trim() !== ']') {
+            console.warn("[Server] Remaining data in buffer after Gemini stream end:", jsonBuffer);
+        }
+        
+        res.write('data: {"event": "EOS"}\n\n');
+        res.end();
+        console.log("[Server] Finished processing Gemini stream and sent EOS to client.");
+      });
+
+      geminiResponse.data.on('error', (streamError) => { 
+        console.error('[Server] Error event during Gemini stream pipe:', streamError);
+        if (!res.writableEnded) {
+          try {
+            res.write(`data: ${JSON.stringify({ error: streamError.message || 'Gemini stream pipe error event' })}\n\n`);
+            res.write('data: {"event": "EOS"}\n\n');
+            res.end();
+          } catch (e) {
+            console.error("[Server] Error writing error to client response after stream error:", e);
+            if (!res.writableEnded) res.end(); 
+          }
+        }
+      });
+
+    } catch (err) {
+      console.error('[Server] Error setting up or during Gemini stream request:', err.isAxiosError ? err.message : err);
+      let errorMessage = 'Failed to connect to Gemini API for streaming.';
+      if (err.response && err.response.data) { 
+          let errorData = err.response.data;
+          if (errorData instanceof require('stream').Readable) { 
+              let chunks = [];
+              errorData.on('data', chunk => chunks.push(chunk));
+              errorData.on('end', () => {
+                  const errorString = Buffer.concat(chunks).toString();
+                  console.error("[Server] Gemini error response (streamed):", errorString);
+                  try {
+                      const parsedError = JSON.parse(errorString);
+                      errorMessage = parsedError.error ? (parsedError.error.message || errorString) : errorString;
+                  } catch (parseErr) {
+                      errorMessage = errorString;
+                  }
+                  if (!res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+                    res.write('data: {"event": "EOS"}\n\n');
+                    res.end();
+                  }
+              });
+              return; 
+          } else {
+               console.error("[Server] Gemini error response (data):", errorData);
+               if(errorData.error && errorData.error.message) {
+                   errorMessage = errorData.error.message;
+               } else if (typeof errorData === 'string') {
+                   errorMessage = errorData;
+               } else if (err.message) {
+                   errorMessage = err.message;
+               }
+          }
+      } else if (err.message) {
+          errorMessage = err.message;
+      }
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+        res.write('data: {"event": "EOS"}\n\n'); 
+        res.end();
+      }
+    }
   }
 });
 
