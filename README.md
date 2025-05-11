@@ -2,7 +2,7 @@
 
 ## Demo Video
 
-[![ZeroCoder Demo Video](https://img.youtube.com/vi/J0zxpeXcN9M/hqdefault.jpg)](https://youtu.be/J0zxpeXcN9M)
+[![ZeroCoder Demo Video](./public/zerocoder.png)](https://youtu.be/J0zxpeXcN9M)
 
 *(Click the image above to watch the demo on YouTube)*
 
