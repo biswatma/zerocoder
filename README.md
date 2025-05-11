@@ -168,3 +168,7 @@ Follow these steps to run ZeroCoder locally on your machine:
 -   The `.env` file in this project is not used for the Gemini API key by the server if the client provides one (which it's designed to do).
 
 Enjoy using ZeroCoder!
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
