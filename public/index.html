@@ -182,6 +182,7 @@
       width: 50%; display: flex; flex-direction: column; 
       background-color: var(--main-bg); /* Left panel uses main bg now */
       border-right: 1px solid var(--border-color); 
+      overflow-y: auto; /* Allow vertical scrolling for left panel content */
     }
     .right-panel { 
       width: 50%; height: 100%; 
@@ -386,6 +387,21 @@
     </div>
     <div class="container">
       <div class="left-panel">
+        <div id="engine-selection-section" style="margin-bottom: 15px;">
+          <label for="engineSelect" style="display: block; margin-bottom: 6px; font-weight: 600;">Generation Engine:</label>
+          <select id="engineSelect" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 12px; background-color: var(--input-bg); color: var(--text-color); font-size: 1em; font-family: 'Open Sans', sans-serif; box-shadow: 0 2px 4px var(--shadow-color);">
+            <option value="gemini" selected>Gemini API (Cloud)</option>
+            <option value="lmstudio">LM Studio (Local)</option>
+          </select>
+        </div>
+
+        <div id="lmstudio-options-section" style="margin-bottom: 15px; display: none;">
+          <label for="lmstudioNoThinkToggle" style="display: flex; align-items: center; font-weight: 600; cursor: pointer;">
+            <input type="checkbox" id="lmstudioNoThinkToggle" style="margin-right: 8px;">
+            Disable Model Thinking (appends /no_think)
+          </label>
+        </div>
+
         <div id="api-key-section">
         <div> <!-- This div wraps label and input -->
           <label for="apiKeyInput">Gemini API Key:</label>
@@ -433,14 +449,27 @@
     let editor;
     let lottieAnimation;
     let currentEventSource = null; // For cancelling the EventSource
+    let previewRefreshInterval = null; // For LM Studio iframe refresh
+    let debounceTimer = null; // For debouncing iframe updates
+    const DEBOUNCE_DELAY = 300; // milliseconds
     const initialMessageDiv = document.getElementById('initialMessage');
     const lottieContainerDiv = document.getElementById('lottieContainer');
     const previewIframe = document.getElementById('preview');
+    const engineSelect = document.getElementById('engineSelect');
+    const apiKeySection = document.getElementById('api-key-section');
+    const apiKeyInput = document.getElementById('apiKeyInput'); // Define globally for easier access
+    const lmstudioOptionsSection = document.getElementById('lmstudio-options-section');
+    const lmstudioNoThinkToggle = document.getElementById('lmstudioNoThinkToggle');
 
     document.addEventListener('DOMContentLoaded', function() {
       require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs' }});
       require(['vs/editor/editor.main'], function() {
         loadApiKey(); // Load API key on init
+        updateApiKeySectionVisibility(); // Initial visibility check
+
+        if (engineSelect) {
+          engineSelect.addEventListener('change', updateApiKeySectionVisibility);
+        }
         
         // Initialize Lottie Animation
         if (typeof lottie !== 'undefined') {
@@ -499,26 +528,22 @@
     async function sendPrompt() {
       console.log("sendPrompt() called"); // DEBUG LOG
       initialMessageDiv.style.display = 'none';
-      previewIframe.style.display = 'none'; // Hide iframe
-      
-      lottieContainerDiv.style.display = 'flex'; // Make container visible FIRST
-      if (lottieAnimation) {
-        console.log('Lottie container displayed in sendPrompt. Autoplay is true.');
-        lottieAnimation.resize(); 
-        lottieAnimation.play(); // Explicitly play, as autoplay might not trigger if element was hidden
-        const svgElement = lottieContainerDiv.querySelector('svg');
-        if (svgElement) {
-            svgElement.style.transform = 'scale(0.7)';
-        }
-      } else {
-        console.error('Lottie animation object is not available in sendPrompt.');
-      }
+      // lottieContainerDiv.style.display = 'flex'; // Hide Lottie, show iframe for progressive update
+      lottieContainerDiv.style.display = 'none'; 
+      previewIframe.style.display = 'block'; // Show iframe from the start
+      previewIframe.srcdoc = ""; // Clear previous content from iframe
 
 
-      const apiKey = document.getElementById('apiKeyInput').value;
-      if (!apiKey || !apiKey.trim()) {
+      const selectedEngine = engineSelect.value;
+      const apiKey = apiKeyInput.value; // Already defined globally
+
+      if (selectedEngine === 'gemini' && (!apiKey || !apiKey.trim())) {
         alert('Please enter and save your Gemini API Key first.');
-        document.getElementById('apiKeyInput').focus();
+        apiKeyInput.focus();
+        // Ensure API key section is visible if Gemini is selected and key is missing
+        if (apiKeySection.style.display === 'none') {
+            toggleApiKeyVisibility(); // This will show it
+        }
         return;
       }
 
@@ -549,9 +574,29 @@
         console.error("Monaco editor (variable 'editor') is not initialized!");
       }
 
-      console.log("About to create EventSource for prompt:", userPrompt); // DEBUG LOG
-      // Updated to point to /api/generate for Vercel deployment
-      currentEventSource = new EventSource(`/api/generate?prompt=${encodeURIComponent(userPrompt)}&apiKey=${encodeURIComponent(apiKey)}`);
+      // Clear any existing refresh interval
+      if (previewRefreshInterval) {
+        clearInterval(previewRefreshInterval);
+        previewRefreshInterval = null;
+      }
+
+      console.log("About to create EventSource for prompt:", userPrompt, "with engine:", selectedEngine); // DEBUG LOG
+      
+      let apiUrl = `/api/generate?prompt=${encodeURIComponent(userPrompt)}&engine=${selectedEngine}`;
+      if (selectedEngine === 'gemini') {
+        apiUrl += `&apiKey=${encodeURIComponent(apiKey)}`;
+      } else if (selectedEngine === 'lmstudio') {
+        apiUrl += `&lmstudio_no_think=${lmstudioNoThinkToggle.checked}`;
+        // Start iframe refresh for LM Studio
+        previewRefreshInterval = setInterval(() => {
+          if (editor && editor.getValue().trim() !== "") { // Only refresh if there's content
+            console.log("[LM Studio Preview] Refreshing iframe...");
+            updatePreview(editor.getValue());
+          }
+        }, 5000); // Refresh every 5 seconds
+      }
+      
+      currentEventSource = new EventSource(apiUrl);
       let fullHtmlContent = '';
 
       currentEventSource.onmessage = function(event) {
@@ -560,6 +605,13 @@
         if (data.htmlChunk) {
           fullHtmlContent += data.htmlChunk;
           editor.setValue(fullHtmlContent);
+          
+          // Debounce iframe update
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            updatePreview(fullHtmlContent);
+          }, DEBOUNCE_DELAY);
+
         } else if (data.error) {
           console.error('Error from server stream:', data.error);
           editor.setValue(editor.getValue() + `\n<!-- Server Error: ${data.error} -->`);
@@ -570,6 +622,33 @@
           console.log("End of stream received.");
           if(currentEventSource) currentEventSource.close();
           currentEventSource = null;
+          if (previewRefreshInterval) {
+            clearInterval(previewRefreshInterval);
+            previewRefreshInterval = null;
+            console.log("[LM Studio Preview] Interval cleared on EOS.");
+          }
+
+          // Process fullHtmlContent to remove <think> block and add as comment
+          const thinkStartTag = "<think>";
+          const thinkEndTag = "</think>";
+          let processedHtml = fullHtmlContent;
+          let thinkComment = "";
+
+          const thinkStartIndex = fullHtmlContent.indexOf(thinkStartTag);
+          if (thinkStartIndex !== -1) {
+            const thinkEndIndex = fullHtmlContent.indexOf(thinkEndTag, thinkStartIndex);
+            if (thinkEndIndex !== -1) {
+              const thinkBlockContent = fullHtmlContent.substring(thinkStartIndex + thinkStartTag.length, thinkEndIndex).trim();
+              thinkComment = `<!-- \nMODEL THINKING PROCESS:\n${thinkBlockContent}\n-->\n`;
+              // Remove the think block and any leading/trailing newlines around it from the actual HTML
+              processedHtml = fullHtmlContent.substring(thinkEndIndex + thinkEndTag.length).trimStart();
+            }
+          }
+          
+          // Ensure final update after processing think blocks
+          clearTimeout(debounceTimer); // Clear any pending debounce
+          editor.setValue(thinkComment + processedHtml);
+          updatePreview(thinkComment + processedHtml); // Final update to iframe
           enableGenerateButton(false); // Pass false to indicate success
         }
       };
@@ -579,6 +658,11 @@
         editor.setValue(editor.getValue() + `\n<!-- Streaming connection error. Please try again. -->`);
         if(currentEventSource) currentEventSource.close();
         currentEventSource = null;
+        if (previewRefreshInterval) { // Clear interval on error
+            clearInterval(previewRefreshInterval);
+            previewRefreshInterval = null;
+            console.log("[LM Studio Preview] Interval cleared on EventSource error.");
+        }
         enableGenerateButton(true); // Pass true to indicate error
       };
     }
@@ -589,6 +673,11 @@
         currentEventSource.close();
         currentEventSource = null;
         console.log("EventSource closed by cancel.");
+      }
+      if (previewRefreshInterval) {
+        clearInterval(previewRefreshInterval);
+        previewRefreshInterval = null;
+        console.log("[LM Studio Preview] Interval cleared on cancel.");
       }
       // Pass true to enableGenerateButton to signify an interruption/error state for UI reset
       enableGenerateButton(true); 
@@ -603,17 +692,51 @@
         generateButton.onclick = sendPrompt; // Reset to original function
       }
       document.getElementById('loaderContainer').style.display = 'none';
-      document.getElementById('api-key-section').style.display = 'block';
+      updateApiKeySectionVisibility(); // Ensure correct state after generation
       
-      if(lottieAnimation) lottieAnimation.stop();
+      if (previewRefreshInterval) { 
+        clearInterval(previewRefreshInterval);
+        previewRefreshInterval = null;
+        console.log("[LM Studio Preview] Interval cleared in enableGenerateButton.");
+      }
+
+      // if(lottieAnimation) lottieAnimation.stop(); // Lottie is already hidden
       lottieContainerDiv.style.display = 'none';
 
       if (errorOccurred) {
-        initialMessageDiv.style.display = 'flex'; // Show initial message again on error
-        previewIframe.style.display = 'none';
+        initialMessageDiv.style.display = 'flex'; 
+        previewIframe.style.display = 'none'; // Hide iframe on error
       } else {
-        previewIframe.style.display = 'block'; // Show iframe on success
+        // previewIframe.style.display = 'block'; // Iframe is already visible
         initialMessageDiv.style.display = 'none';
+        // Final update to ensure preview shows the very latest from editor if EOS processing changed it
+        if(editor) updatePreview(editor.getValue()); 
+      }
+    }
+
+    function updateApiKeySectionVisibility() {
+      const selectedEngine = engineSelect.value;
+      const apiKeySectionDiv = document.getElementById('api-key-section'); 
+      const toggleButton = document.getElementById('toggleApiKeyBtn');
+      const lmstudioOptionsDiv = document.getElementById('lmstudio-options-section');
+
+      if (selectedEngine === 'gemini') {
+        if (localStorage.getItem('geminiApiKey')) {
+            apiKeySectionDiv.style.display = 'none'; 
+        } else {
+            apiKeySectionDiv.style.display = 'block'; 
+        }
+        if (toggleButton) toggleButton.style.display = 'inline-flex'; 
+        if (lmstudioOptionsDiv) lmstudioOptionsDiv.style.display = 'none';
+        
+      } else if (selectedEngine === 'lmstudio') {
+        apiKeySectionDiv.style.display = 'none';
+        if (toggleButton) toggleButton.style.display = 'none'; 
+        if (lmstudioOptionsDiv) lmstudioOptionsDiv.style.display = 'block';
+      } else { // Other engines, if any in future
+        apiKeySectionDiv.style.display = 'none';
+        if (toggleButton) toggleButton.style.display = 'none';
+        if (lmstudioOptionsDiv) lmstudioOptionsDiv.style.display = 'none';
       }
     }
 
@@ -657,13 +780,16 @@
     }
 
     function saveApiKey() {
-      const apiKeyInput = document.getElementById('apiKeyInput');
+      // apiKeyInput is already globally defined
       const apiKey = apiKeyInput.value.trim();
       if (apiKey) {
         localStorage.setItem('geminiApiKey', apiKey);
         apiKeyInput.type = 'password'; // Keep it masked after saving
         document.getElementById('apiKeyStatus').textContent = "Your API key is securely stored in your browser's local cache and is not shared externally.";
-        document.getElementById('api-key-section').style.display = 'none'; // Hide section after save
+        // apiKeySection is globally defined
+        if (engineSelect.value === 'gemini') { // Only hide if Gemini is selected
+            apiKeySection.style.display = 'none'; 
+        }
         console.log('API Key saved.');
       } else {
         alert('Please enter an API Key to save.');
@@ -672,44 +798,58 @@
 
     function loadApiKey() {
       const savedKey = localStorage.getItem('geminiApiKey');
-      const apiKeyInput = document.getElementById('apiKeyInput');
-      const apiKeyStatus = document.getElementById('apiKeyStatus');
-      const apiKeySection = document.getElementById('api-key-section');
+      // apiKeyInput, apiKeyStatus, apiKeySection are globally defined
+      const apiKeyStatusDiv = document.getElementById('apiKeyStatus'); // get it fresh
+
       if (savedKey) {
         apiKeyInput.value = savedKey;
         apiKeyInput.type = 'password';
-        apiKeyStatus.textContent = "Your API key is securely stored in your browser's local cache and is not shared externally.";
-        apiKeySection.style.display = 'none'; // Hide if key exists
+        apiKeyStatusDiv.textContent = "Your API key is securely stored in your browser's local cache and is not shared externally.";
+        if (engineSelect.value === 'gemini') { // Only hide if Gemini is selected and key exists
+            apiKeySection.style.display = 'none'; 
+        } else {
+            apiKeySection.style.display = 'none'; // Always hide for LM Studio initially
+        }
       } else {
-        apiKeyInput.type = 'text'; // Show as text if no key yet
-        apiKeyStatus.textContent = 'No API Key found. Please enter and save one.'; // This message remains
-        apiKeySection.style.display = 'block'; // Show if no key
+        apiKeyInput.type = 'text'; 
+        apiKeyStatusDiv.textContent = 'No API Key found. Please enter and save one.';
+        if (engineSelect.value === 'gemini') { // Only show if Gemini is selected and no key
+            apiKeySection.style.display = 'block';
+        } else {
+            apiKeySection.style.display = 'none'; // Keep hidden for LM Studio
+        }
       }
     }
 
     function clearApiKey() {
-      const apiKeyInput = document.getElementById('apiKeyInput');
-      const apiKeyStatus = document.getElementById('apiKeyStatus');
-      const apiKeySection = document.getElementById('api-key-section');
+      // apiKeyInput, apiKeyStatus, apiKeySection are globally defined
+      const apiKeyStatusDiv = document.getElementById('apiKeyStatus'); // get it fresh
       localStorage.removeItem('geminiApiKey');
       apiKeyInput.value = '';
-      apiKeyInput.type = 'text'; // Show as text for new input
+      apiKeyInput.type = 'text'; 
       apiKeyInput.focus();
-      apiKeyStatus.textContent = 'API Key cleared. Enter a new key and save.';
-      apiKeySection.style.display = 'block'; // Show section to enter new key
+      apiKeyStatusDiv.textContent = 'API Key cleared. Enter a new key and save.';
+      if (engineSelect.value === 'gemini') { // Only show if Gemini is selected
+        apiKeySection.style.display = 'block'; 
+      }
       console.log('API Key cleared.');
     }
 
     function toggleApiKeyVisibility() {
-      const apiKeySection = document.getElementById('api-key-section');
-      if (apiKeySection.style.display === 'none' || apiKeySection.style.display === '') {
-        apiKeySection.style.display = 'block';
+      // apiKeySection is globally defined
+      if (engineSelect.value === 'gemini') { // Only toggle for Gemini
+        if (apiKeySection.style.display === 'none' || apiKeySection.style.display === '') {
+          apiKeySection.style.display = 'block';
+        } else {
+          apiKeySection.style.display = 'none';
+        }
       } else {
+        // For LM Studio, ensure it's hidden if this function is somehow called
         apiKeySection.style.display = 'none';
       }
     }
 
-    // Initial load of API key when script runs (after DOM is ready for these elements)
+    // Initial load of API key and visibility setup
     // Moved loadApiKey() call to inside the require(['vs/editor/editor.main']...) block to ensure DOM is ready.
     
     // Theme switcher logic
