@@ -58,7 +58,10 @@ function processGeneratedHtml(combinedHtml) {
 module.exports = async (req, res) => {
   console.log("[Vercel Function] /api/generate invoked.");
 
-  const prompt = req.query.prompt;
+  const prompt = req.query.prompt; // This will be the edit instruction if isEdit is true
+  const isEdit = req.query.isEdit === 'true';
+  const currentHtml = req.query.currentHtml; // Existing HTML for edit mode
+
   // Prioritize Vercel environment variable for API key, fallback to query param if needed (less secure)
   const apiKeyFromEnv = process.env.GEMINI_API_KEY;
   const apiKeyFromQuery = req.query.apiKey;
@@ -82,14 +85,22 @@ module.exports = async (req, res) => {
 
   try {
     const geminiStreamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:streamGenerateContent?key=${apiKeyToUse}`;
-    const systemPromptText = "You are an HTML code generation engine. Your output MUST be a single, complete, valid HTML document. Start your response *directly* with `<!DOCTYPE html>`. Do NOT include any other text, explanations, summaries, markdown formatting (like ```html), or any characters whatsoever before `<!DOCTYPE html>` or after `</html>`. Only output the raw HTML code itself.";
+    const systemPromptText = "You are Zerocoder, an advanced HTML code generation engine. Your output MUST be a single, complete, and valid HTML document using Tailwind CSS (via CDN in the <head>). All designs must be responsive, visually appealing, and follow modern UI/UX best practices.\\n\\nFor any image content, if no suitable external image is available, generate SVG graphics directly within the HTML. The SVGs should be simple, clean, and vector-based to fit the content needs (e.g., icons, logos, or abstract patterns). These SVGs should be visually appropriate for the section of the site they appear in and should follow best design principles (e.g., minimalistic icons, geometric shapes, or abstract art for backgrounds).\\n\\nUse high-quality placeholder services like Lorem Picsum or Unsplash Source for images when necessary, but prioritize SVGs when appropriate.\\n\\nYour initial response must contain ONLY raw HTML. Start exactly with <!DOCTYPE html> and end with </html>. No markdown, comments, or extra characters are allowed—just clean, production-ready HTML.\\n\\n**IMPORTANT EDITING INSTRUCTIONS:**\\nWhen an 'Edit Instruction' is provided along with 'Existing HTML':\\n1.  You MUST treat the 'Existing HTML' as the source document.\\n2.  You MUST NOT regenerate the entire HTML document from scratch.\\n3.  Your goal is to make the MINIMAL necessary change to the 'Existing HTML' to satisfy the 'Edit Instruction'.\\n4.  Identify the specific HTML element(s) or section(s) targeted by the 'Edit Instruction'.\\n5.  Modify ONLY that specific part. All other parts of the 'Existing HTML' MUST be preserved exactly as they were.\\n6.  After making the precise modification, your output MUST be the *entire, complete, and valid HTML document*, which includes your targeted change integrated into the original, otherwise unchanged, 'Existing HTML'.\\n7.  Do NOT output only the changed snippet. Do NOT include any explanations, apologies, or markdown. Output ONLY the full, modified HTML document starting with `<!DOCTYPE html>` and ending with `</html>`.\\n\\nRepeat this edit cycle until the user confirms the final version.";
+    
+    let requestText = prompt; // Default to the original prompt for new generation
+    if (isEdit && currentHtml) {
+      requestText = `Existing HTML:\n---\n${currentHtml}\n---\nEdit Instruction:\n${prompt}`;
+      console.log("[Vercel Function] Edit mode detected. Combined text for Gemini:", requestText.substring(0, 200) + "...");
+    } else {
+      console.log(`[Vercel Function] Attempting to stream from Gemini for prompt: "${prompt}"`);
+    }
     
     const geminiPayload = {
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts: [{ text: requestText }] }],
       system_instruction: { parts: [{ text: systemPromptText }] }
     };
 
-    console.log(`[Vercel Function] Attempting to stream from Gemini for prompt: "${prompt}"`);
+    console.log(`[Vercel Function] Sending payload to Gemini.`);
     const geminiResponse = await axios.post(geminiStreamUrl, geminiPayload, {
       responseType: 'stream'
     });
