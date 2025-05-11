@@ -1,6 +1,8 @@
 # ZeroCoder - AI Web Generator
 
-**Try the Live Demo: <a href="https://zerocoder-zeta.vercel.app/" target="_blank" rel="noopener noreferrer">https://zerocoder-zeta.vercel.app/</a>**
+**Try the Live Demo:**  
+👉 [Click here to open Zerocoder Live Demo](https://zerocoder-zeta.vercel.app/) (opens in same tab — right-click to open in new tab)
+
 
 ## Demo Video
 
