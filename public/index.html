@@ -16,13 +16,42 @@
       --loader-dot-color: #e0e1dd; /* Light color for loader dots */
     }
 
-    body, html { 
-      margin: 0; padding: 0; height: 100%; overflow: hidden; 
+    body, html {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background-color: var(--bg-color);
       color: var(--text-color);
     }
-    .container { display: flex; height: 100vh; }
+    .app-wrapper {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 20px;
+      background-color: var(--panel-bg);
+      border-bottom: 1px solid var(--border-color);
+      flex-shrink: 0; /* Prevent header from shrinking */
+    }
+    .header-title { /* Renamed from main-title and adjusted */
+      margin: 0; /* Remove default h1 margin */
+      color: var(--text-color);
+      font-size: 1.6em; /* Slightly smaller */
+      font-weight: 600;
+    }
+    .github-link svg {
+      fill: var(--text-color);
+      width: 28px; /* Adjust size as needed */
+      height: 28px;
+      vertical-align: middle;
+    }
+    .github-link:hover svg {
+      fill: var(--secondary-accent); /* Highlight on hover */
+    }
+    .container { display: flex; flex-grow: 1; overflow: hidden; /* Added overflow: hidden */ }
     .left-panel { 
       width: 50%; padding: 20px; display: flex; flex-direction: column; 
       box-sizing: border-box; 
@@ -165,9 +194,16 @@
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="left-panel">
-      <div id="api-key-section">
+  <div class="app-wrapper">
+    <header class="app-header">
+      <h1 class="header-title">ZeroCoder - AI Web Generator</h1>
+      <a href="https://github.com/biswatma/zerocoder" target="_blank" rel="noopener noreferrer" class="github-link" title="View on GitHub">
+        <svg viewBox="0 0 16 16" version="1.1" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21-.15.46-.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+      </a>
+    </header>
+    <div class="container">
+      <div class="left-panel">
+        <div id="api-key-section">
         <div>
           <label for="apiKeyInput">Gemini API Key:</label>
           <input type="password" id="apiKeyInput" placeholder="Enter your Gemini API Key">
@@ -204,6 +240,7 @@
       <iframe id="preview" style="display: none;"></iframe>
     </div>
   </div>
+  </div> <!-- Closing app-wrapper -->
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.0/lottie.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/loader.js"></script>
@@ -212,6 +249,7 @@
   <script>
     let editor;
     let lottieAnimation;
+    let currentEventSource = null; // For cancelling the EventSource
     const initialMessageDiv = document.getElementById('initialMessage');
     const lottieContainerDiv = document.getElementById('lottieContainer');
     const previewIframe = document.getElementById('preview');
@@ -308,14 +346,17 @@
         return;
       }
       
-      const generateButton = document.querySelector('button[onclick="sendPrompt()"]');
+      const generateButton = document.getElementById('generateBtn'); // Use ID for consistency
       if (!generateButton) {
         console.error("Generate button not found!"); // DEBUG LOG
         return;
       }
       
-      generateButton.disabled = true;
-      generateButton.textContent = 'Generating...';
+      // Change button to Cancel mode
+      generateButton.textContent = 'Cancel';
+      generateButton.onclick = cancelGeneration;
+      // generateButton.disabled = false; // Ensure cancel is clickable, though it's not strictly disabled by default
+
       document.getElementById('loaderContainer').style.display = 'block'; 
       document.getElementById('api-key-section').style.display = 'none'; // Hide API key section
       
@@ -327,10 +368,10 @@
 
       console.log("About to create EventSource for prompt:", userPrompt); // DEBUG LOG
       // Updated to point to /api/generate for Vercel deployment
-      const eventSource = new EventSource(`/api/generate?prompt=${encodeURIComponent(userPrompt)}&apiKey=${encodeURIComponent(apiKey)}`);
+      currentEventSource = new EventSource(`/api/generate?prompt=${encodeURIComponent(userPrompt)}&apiKey=${encodeURIComponent(apiKey)}`);
       let fullHtmlContent = '';
 
-      eventSource.onmessage = function(event) {
+      currentEventSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
 
         if (data.htmlChunk) {
@@ -339,28 +380,44 @@
         } else if (data.error) {
           console.error('Error from server stream:', data.error);
           editor.setValue(editor.getValue() + `\n<!-- Server Error: ${data.error} -->`);
-          eventSource.close();
+          if(currentEventSource) currentEventSource.close();
+          currentEventSource = null;
           enableGenerateButton(true); // Pass true to indicate error
         } else if (data.event === "EOS") {
           console.log("End of stream received.");
-          eventSource.close();
+          if(currentEventSource) currentEventSource.close();
+          currentEventSource = null;
           enableGenerateButton(false); // Pass false to indicate success
         }
       };
 
-      eventSource.onerror = function(err) {
+      currentEventSource.onerror = function(err) {
         console.error('EventSource failed:', err);
         editor.setValue(editor.getValue() + `\n<!-- Streaming connection error. Please try again. -->`);
-        eventSource.close();
+        if(currentEventSource) currentEventSource.close();
+        currentEventSource = null;
         enableGenerateButton(true); // Pass true to indicate error
       };
     }
 
+    function cancelGeneration() {
+      console.log("Cancel generation called.");
+      if (currentEventSource) {
+        currentEventSource.close();
+        currentEventSource = null;
+        console.log("EventSource closed by cancel.");
+      }
+      // Pass true to enableGenerateButton to signify an interruption/error state for UI reset
+      enableGenerateButton(true); 
+      // The generateButton's text and onclick will be reset by enableGenerateButton
+    }
+
     function enableGenerateButton(errorOccurred = false) {
-      const generateButton = document.querySelector('button[onclick="sendPrompt()"]');
+      const generateButton = document.getElementById('generateBtn'); // Use ID
       if (generateButton) {
         generateButton.disabled = false;
         generateButton.textContent = 'Generate';
+        generateButton.onclick = sendPrompt; // Reset to original function
       }
       document.getElementById('loaderContainer').style.display = 'none';
       document.getElementById('api-key-section').style.display = 'block';

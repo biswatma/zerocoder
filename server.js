@@ -217,4 +217,20 @@ app.get('/api/generate', async (req, res) => {
   }
 });
 
+// Middleware to catch 404 errors
+app.use((req, res, next) => {
+  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+});
+
+// Optional: Basic error handler for other errors (e.g., 500)
+// This should be the last middleware
+app.use((err, req, res, next) => {
+  console.error("[Server Error Handler]", err.stack);
+  // If headers already sent, delegate to default Express error handler
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).send(err.message || 'Something broke on the server!');
+});
+
 app.listen(3000, () => console.log('Server running on port 3000'));
