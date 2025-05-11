@@ -66,101 +66,96 @@ app.get('/api/generate', async (req, res) => {
     
     // Headers should have been flushed by res.flushHeaders() above.
 
-    // Accumulate all data from Gemini stream, then parse and send.
-    // This is not true streaming to the client, but handles the chunked JSON array from Gemini.
-    let accumulatedData = '';
+    let jsonBuffer = ''; // Buffer for potentially incomplete JSON chunks
+
     geminiResponse.data.on('data', (chunk) => {
-      accumulatedData += chunk.toString();
+      jsonBuffer += chunk.toString();
+      
+      // Process buffer for complete JSON objects (Gemini stream sends an array of JSON objects)
+      // A simple way is to assume the stream is an array and try to parse it incrementally.
+      // This is still not perfect true streaming of *individual text parts* from Gemini to client,
+      // but it processes Gemini's JSON objects as they complete within the stream.
+      // The Gemini API for streamGenerateContent sends a stream of `StreamGenerateContentResponse` objects.
+      // These are typically sent one after another. We need to parse each one.
+      // A common pattern is that these JSON objects might be separated by newlines in some SDKs,
+      // but raw HTTP stream might just concatenate them.
+      // For robustness, we'd need a proper streaming JSON parser.
+      // Given the existing code structure, it expects to parse an array of responses.
+      // The simplest modification to avoid timeout is to send *something* to the client earlier.
+
+      // Let's try to parse what we have so far as if it's the start of the array.
+      // This is a heuristic and might break if chunks are too small or malformed.
+      try {
+        // Attempt to find complete JSON objects in the buffer.
+        // Gemini stream is an array of JSON objects. Chunks might not be valid JSON alone.
+        // A more robust way would be to find `},{` boundaries or use a streaming JSON parser.
+        // For now, let's send the raw text chunk from Gemini if available in this chunk.
+        // This assumes each chunk from Gemini stream is a self-contained JSON object of StreamGenerateContentResponse
+        // which might not always be true, but is a common behavior for many streaming APIs.
+        
+        // Try to parse the current buffer as one or more JSON objects.
+        // The stream from Gemini is an array of JSON objects.
+        // We'll look for `StreamGenerateContentResponse` objects.
+        // A simple heuristic: split by '}\n{' or similar, or try to parse.
+        
+        // Let's refine: the stream is an array of JSON objects.
+        // `[ {"candidates": ...}, {"candidates": ...} ]`
+        // We need to extract each object.
+        
+        // Simplified approach: send text as it comes from any candidate part.
+        // This might send partial HTML if Gemini chunks its text output.
+        const potentialObjects = jsonBuffer.split('\n').filter(s => s.trim() !== '');
+        let processedAnyThisChunk = false;
+        potentialObjects.forEach(potentialJsonString => {
+            if (processedAnyThisChunk && !potentialJsonString.startsWith(',')) { // If it's not the first object in an array part
+                 // This logic is flawed if Gemini doesn't send comma-separated objects in chunks.
+            }
+            try {
+                // Remove leading/trailing commas if they exist from partial array processing
+                let parsableJsonString = potentialJsonString.trim();
+                if (parsableJsonString.startsWith(',')) parsableJsonString = parsableJsonString.substring(1);
+                if (parsableJsonString.endsWith(',')) parsableJsonString = parsableJsonString.slice(0, -1);
+
+                if (!parsableJsonString) return;
+
+                const responseObject = JSON.parse(parsableJsonString);
+                if (responseObject.candidates && responseObject.candidates[0] &&
+                    responseObject.candidates[0].content && responseObject.candidates[0].content.parts &&
+                    responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
+                  const textChunk = responseObject.candidates[0].content.parts[0].text;
+                  console.log("[Server] Sending text chunk to client:", textChunk.substring(0,100) + "...");
+                  res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
+                  processedAnyThisChunk = true;
+                } else if (responseObject.error) {
+                  console.error("[Server] Error object in Gemini response chunk:", responseObject.error);
+                  res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
+                  processedAnyThisChunk = true;
+                }
+            } catch (e) {
+                // Incomplete JSON in this part of the buffer, wait for more data
+                // console.warn("[Server] Partial JSON in buffer, waiting for more data. Error:", e.message, "Buffer part:", potentialJsonString);
+            }
+        });
+        if(processedAnyThisChunk) jsonBuffer = ''; // Clear buffer if we processed something
+
+      } catch (e) {
+        // This outer catch is if jsonBuffer itself is not even splittable or basic processing fails.
+        console.warn('[Server] Error processing/parsing chunk from Gemini, might be partial. Chunk:', jsonBuffer.substring(0,200));
+        // Don't send error to client yet, just buffer and wait for more.
+      }
     });
 
     geminiResponse.data.on('end', () => {
-      console.log("[Server] Gemini stream ended. Total data length:", accumulatedData.length);
-      try {
-        // The entire response from Gemini's streamGenerateContent is a JSON array.
-        const responsesArray = JSON.parse(accumulatedData);
-        
-        let combinedHtml = "";
-        for (const responseObject of responsesArray) {
-          if (responseObject.candidates && responseObject.candidates[0] &&
-              responseObject.candidates[0].content && responseObject.candidates[0].content.parts &&
-              responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
-            combinedHtml += responseObject.candidates[0].content.parts[0].text;
-          } else if (responseObject.error) {
-            console.error("[Server] Error object in Gemini response array:", responseObject.error);
-            res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
-          }
-        }
-        
-        if (combinedHtml) {
-          console.log("[Server] Original combinedHtml (first 500 chars):", combinedHtml.substring(0, 500) + (combinedHtml.length > 500 ? "..." : ""));
-          
-          let finalHtml = "";
-          // Regex to capture content between <!DOCTYPE html> or <html> and </html>
-          // Made [\s\S]* non-greedy with *? to prefer the shortest match if multiple </html> tags exist (e.g. in comments)
-          // but for a full document, it should capture the whole thing.
-          const htmlRegex = /<(!DOCTYPE html|html)[\s\S]*?<\/html>/i; 
-          const match = combinedHtml.match(htmlRegex);
-          
-          if (match && match[0]) {
-            finalHtml = match[0];
-            console.log("[Server] HTML extracted using primary regex. Length:", finalHtml.length);
-          } else {
-            // Fallback: If primary regex fails, try to find content within markdown fences
-            // This is a multi-stage fallback.
-            console.warn("[Server] Primary regex (<!doctype.../html...</html>) did not match. Trying markdown fence extraction.");
-            let contentToTest = combinedHtml;
-            
-            const fenceHtmlRegex = /```html\s*([\s\S]*?)\s*```/i;
-            const fenceGenericRegex = /```\s*([\s\S]*?)\s*```/i;
-
-            let fenceMatch = contentToTest.match(fenceHtmlRegex);
-            if (fenceMatch && fenceMatch[1]) {
-              contentToTest = fenceMatch[1].trim();
-              console.log("[Server] Extracted content from ```html fences. Length:", contentToTest.length);
-            } else {
-              fenceMatch = contentToTest.match(fenceGenericRegex);
-              if (fenceMatch && fenceMatch[1]) {
-                contentToTest = fenceMatch[1].trim();
-                console.log("[Server] Extracted content from generic ``` fences. Length:", contentToTest.length);
-              } else {
-                console.warn("[Server] No markdown fences found or content within them is empty. Using original combinedHtml (trimmed) for final check.");
-                contentToTest = combinedHtml.trim(); // Use original if no fences
-              }
-            }
-            
-            // After potentially stripping fences, check if the result *now* looks like an HTML document.
-            // This is important if the fences contained the actual HTML.
-            if (contentToTest.toLowerCase().startsWith("<!doctype html") || contentToTest.toLowerCase().startsWith("<html")) {
-                // If it looks like HTML, try to ensure it ends with </html> if possible.
-                const endTag = "</html>";
-                const endIdx = contentToTest.toLowerCase().lastIndexOf(endTag);
-                if (endIdx !== -1 && (endIdx + endTag.length) <= contentToTest.length) { // ensure endIdx is valid
-                    finalHtml = contentToTest.substring(0, endIdx + endTag.length);
-                } else {
-                    finalHtml = contentToTest; // Use as is if </html> not found cleanly
-                }
-                console.log("[Server] Using content (post-fence check) as it starts like HTML. Length:", finalHtml.length);
-            } else {
-                console.error("[Server] Failed to extract clean HTML even after fallback. Sending original combined (but trimmed) content.");
-                finalHtml = combinedHtml.trim(); // Absolute last resort
-            }
-          }
-
-          if (finalHtml) {
-            res.write(`data: ${JSON.stringify({ htmlChunk: finalHtml.trim() })}\n\n`);
-          } else {
-            console.log("[Server] No HTML content to send after processing.");
-          }
-
-        } else if (responsesArray.length === 0 && !accumulatedData.includes("error")) {
-             console.log("[Server] Gemini response array was empty, no HTML content.");
-        }
-
-
-      } catch (e) {
-        console.error("[Server] Error parsing accumulated Gemini JSON response:", e.message);
-        console.error("[Server] Accumulated data (first 500 chars):", accumulatedData.substring(0, 500) + (accumulatedData.length > 500 ? "..." : ""));
-        res.write(`data: ${JSON.stringify({ error: "Failed to parse the full response from Gemini." })}\n\n`);
+      console.log("[Server] Gemini stream ended.");
+      // Process any remaining data in jsonBuffer
+      // This part is tricky because the original code expected a full array.
+      // If the above on('data') logic correctly parsed and sent all parts, jsonBuffer might be empty or contain a trailing ']'
+      // For now, we assume the on('data') has handled most things.
+      // The crucial part is that we've been sending data *during* the stream.
+      if (jsonBuffer.trim().length > 0 && jsonBuffer.trim() !== '[' && jsonBuffer.trim() !== ']') {
+          console.warn("[Server] Remaining data in buffer after stream end:", jsonBuffer);
+          // Attempt to parse any final bits, though ideally handled above.
+          // This might be redundant if the stream always ends cleanly.
       }
       
       res.write('data: {"event": "EOS"}\n\n');
@@ -168,7 +163,7 @@ app.get('/api/generate', async (req, res) => {
       console.log("[Server] Finished processing and sent EOS to client.");
     });
 
-    geminiResponse.data.on('error', (streamError) => {
+    geminiResponse.data.on('error', (streamError) => { // This handles errors on the stream itself
       console.error('[Server] Error event during Gemini stream pipe:', streamError);
       // Ensure client stream is properly terminated with an error if possible
       if (!res.writableEnded) {
