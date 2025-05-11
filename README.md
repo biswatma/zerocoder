@@ -2,8 +2,9 @@
 
 ## Demo Video
 
-[Watch a demo of ZeroCoder in action!](./public/demo/demo_compress.mp4)
-*(Click the link to view the video. You might need to download it or your browser might play it directly if supported.)*
+[![ZeroCoder Demo Video](https://img.youtube.com/vi/J0zxpeXcN9M/hqdefault.jpg)](https://youtu.be/J0zxpeXcN9M)
+
+*(Click the image above to watch the demo on YouTube)*
 
 ---
 
