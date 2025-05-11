@@ -4,39 +4,61 @@
   <title>ZeroCoder - AI Web Generator</title>
   <link rel="icon" type="image/png" href="assets/logo.png">
   <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/editor/editor.main.css">
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-color: #1a1a2e; /* Dark blue-purple */
-      --panel-bg: #16213e; /* Darker blue */
-      --text-color: #e0e1dd; /* Light grey/off-white */
-      --primary-accent: #0f3460; /* Darker accent for buttons */
-      --secondary-accent: #537895; /* Lighter accent / glassmorphism hint */
-      --border-color: #4a4a58; /* Muted border */
-      --glass-bg: rgba(255, 255, 255, 0.05); /* Glassmorphism background */
-      --glass-blur: 10px;
-      --loader-dot-color: #e0e1dd; /* Light color for loader dots */
+      /* Default to Dark Mode */
+      --main-bg: #202123;
+      --panel-bg: #343541;
+      --text-color: #ffffff;
+      --button-bg: #10a37f;
+      --button-text: #ffffff;
+      --border-color: #4a4a58; /* Existing, adjust if needed */
+      --input-bg: #2c3e50; /* Existing, adjust if needed */
+      --shadow-color: rgba(0, 0, 0, 0.1); /* Generic shadow, can be themed */
+      --glass-bg: rgba(52, 53, 65, 0.8); /* Darker glass for dark mode */
+      --glass-blur: 8px;
+
+      /* Accent colors from previous theme, can be repurposed or removed */
+      --primary-accent: #0f3460; 
+      --secondary-accent: #537895; 
+      --loader-dot-color: #e0e1dd;
+    }
+
+    body.light-mode {
+      --main-bg: #f7f7f8;
+      --panel-bg: #e0e0e0;
+      --text-color: #000000;
+      --button-bg: #10a37f; /* Button color remains same as per spec */
+      --button-text: #ffffff;
+      --border-color: #cccccc; 
+      --input-bg: #ffffff; 
+      --shadow-color: rgba(0, 0, 0, 0.08);
+      --glass-bg: rgba(255, 255, 255, 0.7);
+      --loader-dot-color: #333333;
     }
 
     body, html {
       margin: 0; padding: 0; height: 100%; overflow: hidden;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: var(--bg-color);
+      font-family: 'Open Sans', sans-serif;
+      background-color: var(--main-bg);
       color: var(--text-color);
+      transition: background-color 0.3s ease, color 0.3s ease; /* Smooth theme transition */
     }
-    .app-wrapper { /* This can remain as the overall page wrapper */
+    .app-wrapper { 
       display: flex;
       flex-direction: column;
       height: 100vh;
     }
-    /* User's provided styles, adapted with theme variables */
     .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 10px 20px;
-      background-color: var(--panel-bg); /* Adjusted to theme variable */
-      border-bottom: 1px solid var(--border-color); /* Added for consistency */
+      background-color: var(--panel-bg); 
+      border-bottom: 1px solid var(--border-color); 
       flex-shrink: 0;
+      transition: background-color 0.3s ease, border-color 0.3s ease;
     }
     .left {
       display: flex;
@@ -44,130 +66,237 @@
       gap: 10px;
     }
     .logo { /* This is for the <img class="logo"> */
-      height: 32px; /* User suggested 40px, using 32px to match previous logo height */
+      height: 32px; 
     }
-    .title { /* This is for the <span class="title"> */
-      color: var(--text-color); /* Adjusted to theme variable */
-      font-size: 1.6em; /* Matched previous .header-title */
-      font-weight: 600; /* Matched previous .header-title */
+    .title { 
+      color: var(--text-color); 
+      font-size: 1.5em; /* Adjusted for Open Sans */
+      font-weight: 600; 
     }
     .right {
       display: flex;
       align-items: center;
-      gap: 15px; /* Matched previous gap */
+      gap: 15px; 
     }
     .api-key-btn { 
       display: inline-flex; 
-      align-items: center;    /* Vertically center content */
-      justify-content: center; /* Horizontally center content */
-      height: 30px;           /* Explicit height */
-      padding: 0 12px;        /* Horizontal padding only */
-      background-color: transparent;
-      border: 1px solid var(--secondary-accent); 
+      align-items: center;    
+      justify-content: center; 
+      height: 32px; /* Match logo height */          
+      padding: 0 12px;        
+      background-color: var(--panel-bg); /* Subtle button */
+      border: 1px solid var(--border-color); 
       color: var(--text-color); 
-      border-radius: 4px;
+      border-radius: 8px; /* Softer radius */
       cursor: pointer;
-      font-size: 0.9em;
-      font-weight: 500;
+      font-size: 0.85em; /* Slightly smaller */
+      font-weight: 600;
       box-sizing: border-box;
-      margin-top: 10px; /* Added small top margin */
+      transition: background-color 0.2s ease, border-color 0.2s ease;
     }
     .api-key-btn:hover {
-      background-color: var(--secondary-accent);
-      color: var(--bg-color);
+      background-color: var(--secondary-accent); /* Use existing accent */
+      border-color: var(--secondary-accent);
     }
     .api-key-btn .icon { 
-        margin-right: 5px;
-        display: flex; /* Ensure icon itself is aligned if it has weird spacing */
+        margin-right: 6px;
+        font-size: 1.1em; /* Make icon slightly larger */
+        display: flex; 
         align-items: center;
     }
     .github-link { 
       display: inline-flex;
       align-items: center;
+      justify-content: center;
+      height: 32px; /* Match logo/button height */
+      width: 32px;
     }
-    .github-link svg { /* Styling my SVG to match user's .github-icon intent */
+    .github-link svg { 
       height: 24px;
       width: 24px;
       fill: var(--text-color);
+      transition: fill 0.2s ease;
     }
     .github-link:hover svg {
-      fill: var(--secondary-accent);
+      fill: var(--button-bg); /* Use new button color for hover */
     }
+
+    /* Theme Toggle Switch */
+    .theme-switch-wrapper {
+      display: flex;
+      align-items: center;
+    }
+    .theme-switch {
+      display: inline-block;
+      height: 20px; /* Smaller switch */
+      position: relative;
+      width: 40px; /* Smaller switch */
+    }
+    .theme-switch input {
+      display:none;
+    }
+    .slider {
+      background-color: var(--secondary-accent); /* Use an accent for the track */
+      bottom: 0;
+      cursor: pointer;
+      left: 0;
+      position: absolute;
+      right: 0;
+      top: 0;
+      transition: .4s;
+      border-radius: 20px; /* Rounded track */
+    }
+    .slider:before {
+      background-color: var(--main-bg); /* Knob background to contrast with slider track */
+      bottom: 2px; 
+      content: "🌙"; /* Moon for dark mode (default) */
+      height: 16px; 
+      left: 2px; 
+      position: absolute;
+      transition: .4s;
+      width: 16px; 
+      border-radius: 50%;
+      display: flex; /* For centering content */
+      align-items: center;
+      justify-content: center;
+      font-size: 10px; /* Adjust icon size */
+      color: var(--text-color); /* Icon color */
+    }
+    input:checked + .slider {
+      background-color: var(--button-bg); 
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px); 
+      content: "☀️"; /* Sun for light mode */
+      background-color: var(--main-bg); /* Ensure knob bg contrasts in light mode too */
+      color: var(--text-color); /* Icon color for light mode */
+    }
+
     .container { display: flex; flex-grow: 1; overflow: hidden; }
+    .left-panel, .right-panel {
+      padding: 25px; /* Increased padding */
+      box-sizing: border-box;
+      transition: background-color 0.3s ease;
+    }
     .left-panel { 
-      width: 50%; padding: 20px; display: flex; flex-direction: column; 
-      box-sizing: border-box; 
-      background-color: var(--panel-bg);
+      width: 50%; display: flex; flex-direction: column; 
+      background-color: var(--main-bg); /* Left panel uses main bg now */
       border-right: 1px solid var(--border-color); 
     }
     .right-panel { 
       width: 50%; height: 100%; 
-      /* background-color: #fff; Preview area often white by default - REMOVED to let children control bg */
-      display: flex; /* Use flex to manage children visibility and centering */
+      display: flex; 
       flex-direction: column;
-      justify-content: center; /* Center content vertically */
-      align-items: center; /* Center content horizontally */
-      background-color: var(--bg-color); /* Ensure right panel has the blue background */
+      justify-content: center; 
+      align-items: center; 
+      background-color: var(--main-bg); /* Right panel also uses main bg */
     }
-    .right-panel > div, .right-panel > iframe { /* Ensure direct children can take full space if needed */
+    .right-panel > div, .right-panel > iframe { 
         width: 100%;
         height: 100%;
     }
     
-    #prompt { 
-      width: 100%; /* Changed from calc(100% - 22px) */
-      margin-bottom: 10px; padding: 10px; 
-      border: 1px solid var(--border-color); border-radius: 4px; box-sizing: border-box;
-      background-color: #2c3e50; /* Darker input field */
+    #prompt, #apiKeyInput { 
+      width: 100%; 
+      margin-bottom: 15px; /* Increased spacing */
+      padding: 12px; /* Increased padding */
+      border: 1px solid var(--border-color); 
+      border-radius: 12px; /* ChatGPT style */
+      box-sizing: border-box;
+      background-color: var(--input-bg); 
       color: var(--text-color);
       font-size: 1em;
+      font-family: 'Open Sans', sans-serif;
+      box-shadow: 0 2px 4px var(--shadow-color); /* Soft shadow */
+      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
     }
-    button { 
-      padding: 10px 18px; margin-bottom: 10px; 
-      background-color: var(--primary-accent); 
-      color: var(--text-color); 
-      border: none; border-radius: 5px; cursor: pointer;
-      transition: background-color 0.3s ease;
-      font-weight: bold;
+    #apiKeyInput { min-width: auto; } /* Remove min-width for better flex */
+
+    /* General button styling for action buttons */
+    .action-buttons-container button, .api-key-buttons button {
+      padding: 10px 18px; 
+      background-color: var(--button-bg); 
+      color: var(--button-text); 
+      border: none; 
+      border-radius: 12px; /* ChatGPT style */
+      cursor: pointer;
+      font-weight: 600; /* Bolder */
+      font-size: 0.95em;
+      font-family: 'Open Sans', sans-serif;
+      box-shadow: 0 2px 4px var(--shadow-color); /* Soft shadow */
+      transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.2s ease;
     }
-    button:hover { background-color: var(--secondary-accent); }
+    .action-buttons-container button:hover, .api-key-buttons button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 8px var(--shadow-color); /* Enhanced shadow on hover */
+    }
+    /* Keep specific button colors if needed, or unify */
+    /* #downloadBtn { background-color: #28a745; } */
+    /* #previewBtn { background-color: #17a2b8; } */
     
     #editor-container { 
       flex-grow: 1; 
       border: 1px solid var(--border-color); 
-      border-radius: 4px; 
-      /* Monaco editor will use its own theme (vs-dark) */
+      border-radius: 12px; /* ChatGPT style */
+      box-shadow: 0 2px 4px var(--shadow-color); /* Soft shadow */
+      margin-top: 15px; /* Increased spacing */
+      overflow: hidden; /* Ensure Monaco fits */
     }
-    #preview { width: 100%; height: 100%; border: none; }
+    #preview { width: 100%; height: 100%; border: none; background-color: #fff; /* Preview often needs white bg */ }
+    body.light-mode #preview { background-color: #fff; } /* Ensure preview is white in light mode too */
+    body.dark-mode #preview { background-color: var(--panel-bg); } /* Or a dark bg for preview in dark mode */
 
-    /* API Key Section Styles - Glassmorphism */
+    #initialMessage {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 40px;
+      color: var(--text-color);
+      font-size: 1.5em; /* Slightly larger */
+      font-weight: 700; /* Bold */
+      line-height: 1.6;
+      opacity: 0.75; /* Adjusted opacity */
+      height: 100%; /* To fill parent for centering */
+      box-sizing: border-box;
+      transition: color 0.3s ease, opacity 0.3s ease;
+    }
+
     #api-key-section { 
-      padding: 15px; margin-bottom: 20px; 
+      padding: 20px; /* Increased padding */
+      margin-bottom: 20px; 
       background: var(--glass-bg);
       backdrop-filter: blur(var(--glass-blur));
-      -webkit-backdrop-filter: blur(var(--glass-blur)); /* For Safari */
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px; 
-      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+      -webkit-backdrop-filter: blur(var(--glass-blur)); 
+      border: 1px solid var(--border-color); /* Use themed border */
+      border-radius: 12px; /* ChatGPT style */
+      box-shadow: 0 4px 10px var(--shadow-color); /* Softer shadow */
+      transition: background-color 0.3s ease, border-color 0.3s ease;
     }
-    #api-key-section label { margin-right: 8px; font-weight: bold; color: var(--text-color); }
-    #apiKeyInput { 
-      padding: 8px 10px; 
-      border: 1px solid var(--border-color); 
-      border-radius: 4px; 
-      min-width: 300px; margin-right: 8px;
-      background-color: rgba(0,0,0,0.2); /* Darker transparent */
-      color: var(--text-color);
+    #api-key-section label { 
+      margin-right: 10px; 
+      font-weight: 600; 
+      color: var(--text-color); 
+      display: block; /* To allow margin-bottom */
+      margin-bottom: 6px; /* Added margin */
     }
+    
+    .api-key-buttons { margin-top: 10px; display: flex; gap: 10px; }
     .api-key-buttons button { 
-      padding: 8px 12px; margin-left: 5px; font-size: 0.9em;
-      background-color: var(--secondary-accent); /* Different button color for this section */
+      flex-grow: 1; /* Make buttons share space */
+      margin-left: 0; /* Remove default margin if any */
     }
-    .api-key-buttons button:hover { background-color: var(--primary-accent); }
-    .api-key-info { margin-top:10px; font-size: 0.9em; color: #bbb; /* Lighter grey for info text */ }
-    .api-key-info a { color: #87CEFA; /* LightSkyBlue for better visibility */ text-decoration: underline; }
-    .api-key-info a:hover { color: #ADD8E6; /* Lighter blue on hover */ }
-    #apiKeyStatus { color: #a0a0a0; }
+    .api-key-info { margin-top:10px; font-size: 0.9em; color: var(--text-color); opacity: 0.7; }
+    .api-key-info a { color: #87CEFA; text-decoration: underline; } /* Keep link color distinct */
+    .api-key-info a:hover { color: #ADD8E6; }
+    #apiKeyStatus { 
+      color: var(--text-color); 
+      opacity: 0.65; /* Subtle text */
+      font-size: 0.8em; /* Smaller font size */
+      font-style: italic;
+      margin-top: 8px; /* Adjusted margin */
+    }
 
     /* Action Buttons Container */
     .action-buttons-container {
@@ -189,9 +318,9 @@
       font-size: 1.1em; /* Slightly larger icon */
     }
     /* Specific button styling if needed - using IDs for example */
-    #generateBtn { background-color: var(--primary-accent); }
-    #downloadBtn { background-color: #28a745; } /* Keep green for download */
-    #previewBtn { background-color: #17a2b8; } /* Keep teal for preview */
+    /* #generateBtn { background-color: var(--primary-accent); } /* Removed to use common button style */
+    /* #downloadBtn { background-color: #28a745; } */ /* Keep green for download - ensure this uses var(--button-bg) or is removed */
+    /* #previewBtn { background-color: #17a2b8; } */ /* Keep teal for preview - ensure this uses var(--button-bg) or is removed */
 
 
     /* Loader Styles - Horizontal Bar */
@@ -242,8 +371,14 @@
         <img src="assets/logo.png" alt="ZeroCoder Logo" class="logo"> <!-- Changed class -->
         <span class="title">ZeroCoder - AI Web Generator</span> <!-- Changed from h1 to span and class -->
       </div>
-      <div class="right"> <!-- Changed class -->
-        <button id="toggleApiKeyBtn" class="api-key-btn" onclick="toggleApiKeyVisibility()"><span class="icon">💻</span> API KEY</button> <!-- Changed class, kept icon for now -->
+      <div class="right"> 
+        <div class="theme-switch-wrapper">
+          <label class="theme-switch" for="themeToggleCheckbox">
+            <input type="checkbox" id="themeToggleCheckbox" />
+            <span class="slider round"></span>
+          </label>
+        </div>
+        <button id="toggleApiKeyBtn" class="api-key-btn" onclick="toggleApiKeyVisibility()"><span class="icon">🔑</span> API KEY</button> 
         <a href="https://github.com/biswatma/zerocoder" target="_blank" rel="noopener noreferrer" class="github-link" title="View on GitHub">
           <svg viewBox="0 0 16 16" version="1.1" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21-.15.46-.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
         </a>
@@ -252,15 +387,15 @@
     <div class="container">
       <div class="left-panel">
         <div id="api-key-section">
-        <div>
+        <div> <!-- This div wraps label and input -->
           <label for="apiKeyInput">Gemini API Key:</label>
           <input type="password" id="apiKeyInput" placeholder="Enter your Gemini API Key">
         </div>
-        <div class="api-key-buttons" style="margin-top: 5px;">
+        <div class="api-key-buttons" style="margin-top: 10px;"> <!-- Adjusted margin-top for buttons -->
           <button onclick="saveApiKey()">Save Key</button>
           <button onclick="clearApiKey()">Clear/Edit Key</button>
         </div>
-        <div id="apiKeyStatus" style="margin-top: 5px; font-style: italic;"></div>
+        <div id="apiKeyStatus"></div> <!-- Removed inline style -->
         <div class="api-key-info">
           You can get your Gemini API key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>.
         </div>
@@ -279,7 +414,7 @@
       <div id="editor-container" style="margin-top: 10px;"></div>
     </div>
     <div class="right-panel" id="rightPanel">
-      <div id="initialMessage" style="display: flex; justify-content: center; align-items: center; text-align: center; padding: 20px; color: #777; font-size: 1.2em;">
+      <div id="initialMessage"> <!-- Removed inline styles -->
         Generate sleek, modern websites from a single prompt using the power of AI.
       </div>
       <div id="lottieContainer" style="display: none; justify-content: center; align-items: center;">
@@ -527,7 +662,7 @@
       if (apiKey) {
         localStorage.setItem('geminiApiKey', apiKey);
         apiKeyInput.type = 'password'; // Keep it masked after saving
-        document.getElementById('apiKeyStatus').textContent = 'API Key saved in browser storage.';
+        document.getElementById('apiKeyStatus').textContent = "Your API key is securely stored in your browser's local cache and is not shared externally.";
         document.getElementById('api-key-section').style.display = 'none'; // Hide section after save
         console.log('API Key saved.');
       } else {
@@ -543,11 +678,11 @@
       if (savedKey) {
         apiKeyInput.value = savedKey;
         apiKeyInput.type = 'password';
-        apiKeyStatus.textContent = 'API Key loaded from browser storage.';
+        apiKeyStatus.textContent = "Your API key is securely stored in your browser's local cache and is not shared externally.";
         apiKeySection.style.display = 'none'; // Hide if key exists
       } else {
         apiKeyInput.type = 'text'; // Show as text if no key yet
-        apiKeyStatus.textContent = 'No API Key found. Please enter and save one.';
+        apiKeyStatus.textContent = 'No API Key found. Please enter and save one.'; // This message remains
         apiKeySection.style.display = 'block'; // Show if no key
       }
     }
@@ -576,6 +711,42 @@
 
     // Initial load of API key when script runs (after DOM is ready for these elements)
     // Moved loadApiKey() call to inside the require(['vs/editor/editor.main']...) block to ensure DOM is ready.
+    
+    // Theme switcher logic
+    const themeToggle = document.getElementById('themeToggleCheckbox');
+    const currentTheme = localStorage.getItem('theme');
+
+    function setTheme(theme) {
+      console.log('setTheme called with:', theme);
+      console.log('Body classList BEFORE:', document.body.classList.toString());
+      if (theme === 'light-mode') {
+        document.body.classList.add('light-mode');
+        if(themeToggle) themeToggle.checked = true;
+      } else {
+        document.body.classList.remove('light-mode');
+        if(themeToggle) themeToggle.checked = false;
+      }
+      console.log('Body classList AFTER:', document.body.classList.toString());
+      localStorage.setItem('theme', theme);
+    }
+
+    if (currentTheme) {
+      setTheme(currentTheme);
+    } else {
+      // Default to dark mode if no preference stored
+      setTheme('dark-mode'); 
+    }
+
+    if(themeToggle) {
+      themeToggle.addEventListener('change', function() {
+        if (this.checked) {
+          setTheme('light-mode');
+        } else {
+          setTheme('dark-mode');
+        }
+      });
+    }
+
   </script>
 </body>
 </html>
