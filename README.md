@@ -60,7 +60,7 @@ Follow these steps to run ZeroCoder locally on your machine:
       ```
       You should see a message in your terminal: `Server running on port 3000`.
 
-   **b) Using the Windows One-Click Launcher (`start_server.bat`):**
+   **### Windows One-Click Launcher (`start_server.bat`)**
       - Navigate to the project directory in your File Explorer.
       - Double-click the `start_server.bat` file.
       - This will open a command prompt window, automatically install dependencies if needed (the `node_modules` folder is missing), and then start the server.
