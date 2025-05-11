@@ -29,10 +29,23 @@
       background-color: var(--panel-bg);
       border-right: 1px solid var(--border-color); 
     }
-    .right-panel { width: 50%; height: 100%; background-color: #fff; /* Preview area often white by default */ }
+    .right-panel { 
+      width: 50%; height: 100%; 
+      /* background-color: #fff; Preview area often white by default - REMOVED to let children control bg */
+      display: flex; /* Use flex to manage children visibility and centering */
+      flex-direction: column;
+      justify-content: center; /* Center content vertically */
+      align-items: center; /* Center content horizontally */
+      background-color: var(--bg-color); /* Ensure right panel has the blue background */
+    }
+    .right-panel > div, .right-panel > iframe { /* Ensure direct children can take full space if needed */
+        width: 100%;
+        height: 100%;
+    }
     
     #prompt { 
-      width: calc(100% - 22px); margin-bottom: 10px; padding: 10px; 
+      width: 100%; /* Changed from calc(100% - 22px) */
+      margin-bottom: 10px; padding: 10px; 
       border: 1px solid var(--border-color); border-radius: 4px; box-sizing: border-box;
       background-color: #2c3e50; /* Darker input field */
       color: var(--text-color);
@@ -81,6 +94,8 @@
     }
     .api-key-buttons button:hover { background-color: var(--primary-accent); }
     .api-key-info { margin-top:10px; font-size: 0.9em; color: #bbb; /* Lighter grey for info text */ }
+    .api-key-info a { color: #87CEFA; /* LightSkyBlue for better visibility */ text-decoration: underline; }
+    .api-key-info a:hover { color: #ADD8E6; /* Lighter blue on hover */ }
     #apiKeyStatus { color: #a0a0a0; }
 
     /* Action Buttons Container */
@@ -179,35 +194,105 @@
       </div>
       <div id="editor-container" style="margin-top: 10px;"></div>
     </div>
-    <div class="right-panel">
-      <iframe id="preview"></iframe>
+    <div class="right-panel" id="rightPanel">
+      <div id="initialMessage" style="display: flex; justify-content: center; align-items: center; text-align: center; padding: 20px; color: #777; font-size: 1.2em;">
+        Generate sleek, modern websites from a single prompt using the power of AI.
+      </div>
+      <div id="lottieContainer" style="display: none; justify-content: center; align-items: center;">
+        <!-- Lottie animation will be injected here, scaling will be applied to its child SVG -->
+      </div>
+      <iframe id="preview" style="display: none;"></iframe>
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.0/lottie.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/loader.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/preview.js"></script>
   <script>
     let editor;
-    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs' }});
-    require(['vs/editor/editor.main'], function() {
-      loadApiKey(); // Load API key on init
+    let lottieAnimation;
+    const initialMessageDiv = document.getElementById('initialMessage');
+    const lottieContainerDiv = document.getElementById('lottieContainer');
+    const previewIframe = document.getElementById('preview');
 
-      editor = monaco.editor.create(document.getElementById('editor-container'), {
-        value: '',
-        language: 'html',
-        theme: 'vs-dark',
-        automaticLayout: true
-      });
+    document.addEventListener('DOMContentLoaded', function() {
+      require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs' }});
+      require(['vs/editor/editor.main'], function() {
+        loadApiKey(); // Load API key on init
+        
+        // Initialize Lottie Animation
+        if (typeof lottie !== 'undefined') {
+          lottieAnimation = lottie.loadAnimation({
+            container: lottieContainerDiv,
+            renderer: 'svg',
+            loop: true,
+            autoplay: true, 
+            path: 'assets/lottie_loader.json' 
+          });
 
-      // Link editor to preview
-      editor.onDidChangeModelContent(() => {
-        updatePreview(editor.getValue());
+          lottieAnimation.addEventListener('DOMLoaded', function() {
+            console.log('Lottie animation DOM loaded and ready.');
+            if (lottieContainerDiv.style.display === 'flex') { // Check if it's meant to be visible
+                lottieAnimation.resize();
+                lottieAnimation.play(); 
+            }
+            // Apply scale to the SVG child of the container
+            const svgElement = lottieContainerDiv.querySelector('svg');
+            if (svgElement) {
+                svgElement.style.transform = 'scale(0.7)';
+                svgElement.style.maxWidth = '100%'; // Ensure it doesn't overflow container
+                svgElement.style.maxHeight = '100%';
+            }
+          });
+          lottieAnimation.addEventListener('data_ready', function() {
+            console.log('Lottie animation data_ready.');
+             const svgElement = lottieContainerDiv.querySelector('svg');
+            if (svgElement) {
+                svgElement.style.transform = 'scale(0.7)';
+                svgElement.style.maxWidth = '100%';
+                svgElement.style.maxHeight = '100%';
+            }
+          });
+          lottieAnimation.addEventListener('error', function(error) {
+            console.error('Lottie animation error:', error);
+          });
+        } else {
+          console.error('Lottie library is not defined even after DOMContentLoaded.');
+        }
+
+        editor = monaco.editor.create(document.getElementById('editor-container'), {
+          value: '',
+          language: 'html',
+          theme: 'vs-dark',
+          automaticLayout: true
+        });
+
+        // Link editor to preview
+        editor.onDidChangeModelContent(() => {
+          updatePreview(editor.getValue());
+        });
       });
     });
 
     async function sendPrompt() {
       console.log("sendPrompt() called"); // DEBUG LOG
+      initialMessageDiv.style.display = 'none';
+      previewIframe.style.display = 'none'; // Hide iframe
+      
+      lottieContainerDiv.style.display = 'flex'; // Make container visible FIRST
+      if (lottieAnimation) {
+        console.log('Lottie container displayed in sendPrompt. Autoplay is true.');
+        lottieAnimation.resize(); 
+        lottieAnimation.play(); // Explicitly play, as autoplay might not trigger if element was hidden
+        const svgElement = lottieContainerDiv.querySelector('svg');
+        if (svgElement) {
+            svgElement.style.transform = 'scale(0.7)';
+        }
+      } else {
+        console.error('Lottie animation object is not available in sendPrompt.');
+      }
+
 
       const apiKey = document.getElementById('apiKeyInput').value;
       if (!apiKey || !apiKey.trim()) {
@@ -250,19 +335,16 @@
 
         if (data.htmlChunk) {
           fullHtmlContent += data.htmlChunk;
-          // It's often better to set the full value to avoid performance issues with many small appends
-          // However, for live typing effect, appending might be desired.
-          // Let's try setting full value for robustness with Monaco.
           editor.setValue(fullHtmlContent);
         } else if (data.error) {
           console.error('Error from server stream:', data.error);
           editor.setValue(editor.getValue() + `\n<!-- Server Error: ${data.error} -->`);
           eventSource.close();
-          enableGenerateButton();
+          enableGenerateButton(true); // Pass true to indicate error
         } else if (data.event === "EOS") {
           console.log("End of stream received.");
           eventSource.close();
-          enableGenerateButton();
+          enableGenerateButton(false); // Pass false to indicate success
         }
       };
 
@@ -270,18 +352,29 @@
         console.error('EventSource failed:', err);
         editor.setValue(editor.getValue() + `\n<!-- Streaming connection error. Please try again. -->`);
         eventSource.close();
-        enableGenerateButton();
+        enableGenerateButton(true); // Pass true to indicate error
       };
     }
 
-    function enableGenerateButton() {
-      const generateButton = document.querySelector('button[onclick="sendPrompt()"]'); 
+    function enableGenerateButton(errorOccurred = false) {
+      const generateButton = document.querySelector('button[onclick="sendPrompt()"]');
       if (generateButton) {
         generateButton.disabled = false;
         generateButton.textContent = 'Generate';
       }
       document.getElementById('loaderContainer').style.display = 'none';
-      document.getElementById('api-key-section').style.display = 'block'; // Show API key section
+      document.getElementById('api-key-section').style.display = 'block';
+      
+      if(lottieAnimation) lottieAnimation.stop();
+      lottieContainerDiv.style.display = 'none';
+
+      if (errorOccurred) {
+        initialMessageDiv.style.display = 'flex'; // Show initial message again on error
+        previewIframe.style.display = 'none';
+      } else {
+        previewIframe.style.display = 'block'; // Show iframe on success
+        initialMessageDiv.style.display = 'none';
+      }
     }
 
     function previewInNewTab() {
