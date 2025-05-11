@@ -123,7 +123,16 @@ Follow these steps to run ZeroCoder locally on your machine:
    ```
    You should see a message in your terminal: `Server running on port 3000`.
 
-**6. Run the Server (Windows One-Click Launcher):**
+**6. Run the Server (macOS/Linux One-Click Launcher):**
+   For a convenient way to start the server on macOS or Linux:
+      - Navigate to the project directory in your terminal.
+      - Make the script executable (if you haven't already): `chmod +x start_server.sh`
+      - Run the script: `./start_server.sh`
+      - This will open a command prompt window. It will automatically install dependencies if the `node_modules` folder is missing and then start the server.
+      - Look for the "Server running on port 3000" message in the terminal.
+      - To stop the server, you can press `Ctrl+C` in the terminal window.
+
+**7. Run the Server (Windows One-Click Launcher):**
    For a convenient way to start the server on Windows:
       - Navigate to the project directory in your File Explorer.
       - Double-click the `start_server.bat` file.
@@ -131,23 +140,23 @@ Follow these steps to run ZeroCoder locally on your machine:
       - Look for the "Server running on port 3000" message in the command prompt.
       - To stop the server, you can press `Ctrl+C` in the command prompt window or simply close it.
 
-**7. Access the Application:**
+**8. Access the Application:**
    Open your web browser and navigate to:
    [http://localhost:3000](http://localhost:3000)
 
-**8. Configure API Key in the UI:**
+**9. Configure API Key in the UI:**
    - When you first open the application, you'll see a section for the Gemini API Key.
    - Paste your Gemini API key into the input field.
    - Click "Save Key". This will store the key in your browser's local storage for future sessions.
    - The application will now use this key to communicate with the Gemini API.
 
-**9. Generate a Website:**
+**10. Generate a Website:**
    - Enter a prompt describing the website you want to create (e.g., "a landing page for a coffee shop").
    - Click the "Generate" button.
    - The loader will appear. Wait for the generation to complete.
    - The generated HTML code will appear in the editor on the left, and the live preview will render on the right.
 
-**10. Use Other Features:**
+**11. Use Other Features:**
    - **Download HTML**: Click to download the current HTML from the editor.
    - **Preview in New Tab**: Click to open the current HTML in a new browser tab.
    - **Clear/Edit Key**: Use these buttons in the API key section to manage your saved key.
