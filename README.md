@@ -6,6 +6,8 @@
 
 *(Click the image above to watch the demo on YouTube)*
 
+**Try the Live Demo: [https://zerocoder-zeta.vercel.app/](https://zerocoder-zeta.vercel.app/)**
+
 ---
 
 ZeroCoder is a web application that allows you to generate HTML websites based on text prompts using the Google Gemini API. It features a split UI with a prompt input and code editor on one side, and a live preview iframe on the other.
