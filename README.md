@@ -1,5 +1,12 @@
 # ZeroCoder - AI Web Generator
 
+## Demo Video
+
+[Watch a demo of ZeroCoder in action!](./public/demo/demo_compress.mp4)
+*(Click the link to view the video. You might need to download it or your browser might play it directly if supported.)*
+
+---
+
 ZeroCoder is a web application that allows you to generate HTML websites based on text prompts using the Google Gemini API. It features a split UI with a prompt input and code editor on one side, and a live preview iframe on the other.
 
 ## Features
@@ -51,39 +58,38 @@ Follow these steps to run ZeroCoder locally on your machine:
    npm install
    ```
 
-**5. Run the Server:**
-   Once dependencies are installed, start the Node.js server using one of the following methods:
+**5. Run the Server (Manual / All Platforms):**
+   Once dependencies are installed, you can start the Node.js server directly:
+   ```bash
+   node server.js
+   ```
+   You should see a message in your terminal: `Server running on port 3000`.
 
-   **a) Using Node.js directly (all platforms):**
-      ```bash
-      node server.js
-      ```
-      You should see a message in your terminal: `Server running on port 3000`.
-
-   **### Windows One-Click Launcher (`start_server.bat`)**
+**6. Run the Server (Windows One-Click Launcher):**
+   For a convenient way to start the server on Windows:
       - Navigate to the project directory in your File Explorer.
       - Double-click the `start_server.bat` file.
-      - This will open a command prompt window, automatically install dependencies if needed (the `node_modules` folder is missing), and then start the server.
+      - This will open a command prompt window. It will automatically install dependencies if the `node_modules` folder is missing and then start the server.
       - Look for the "Server running on port 3000" message in the command prompt.
       - To stop the server, you can press `Ctrl+C` in the command prompt window or simply close it.
 
-**6. Access the Application:**
+**7. Access the Application:**
    Open your web browser and navigate to:
    [http://localhost:3000](http://localhost:3000)
 
-**7. Configure API Key in the UI:**
+**8. Configure API Key in the UI:**
    - When you first open the application, you'll see a section for the Gemini API Key.
    - Paste your Gemini API key into the input field.
    - Click "Save Key". This will store the key in your browser's local storage for future sessions.
    - The application will now use this key to communicate with the Gemini API.
 
-**8. Generate a Website:**
+**9. Generate a Website:**
    - Enter a prompt describing the website you want to create (e.g., "a landing page for a coffee shop").
    - Click the "Generate" button.
    - The loader will appear. Wait for the generation to complete.
    - The generated HTML code will appear in the editor on the left, and the live preview will render on the right.
 
-**9. Use Other Features:**
+**10. Use Other Features:**
    - **Download HTML**: Click to download the current HTML from the editor.
    - **Preview in New Tab**: Click to open the current HTML in a new browser tab.
    - **Clear/Edit Key**: Use these buttons in the API key section to manage your saved key.
