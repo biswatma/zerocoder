@@ -52,11 +52,20 @@ Follow these steps to run ZeroCoder locally on your machine:
    ```
 
 **5. Run the Server:**
-   Once dependencies are installed, start the Node.js server:
-   ```bash
-   node server.js
-   ```
-   You should see a message in your terminal: `Server running on port 3000`.
+   Once dependencies are installed, start the Node.js server using one of the following methods:
+
+   **a) Using Node.js directly (all platforms):**
+      ```bash
+      node server.js
+      ```
+      You should see a message in your terminal: `Server running on port 3000`.
+
+   **b) Using the Windows One-Click Launcher (`start_server.bat`):**
+      - Navigate to the project directory in your File Explorer.
+      - Double-click the `start_server.bat` file.
+      - This will open a command prompt window, automatically install dependencies if needed (the `node_modules` folder is missing), and then start the server.
+      - Look for the "Server running on port 3000" message in the command prompt.
+      - To stop the server, you can press `Ctrl+C` in the command prompt window or simply close it.
 
 **6. Access the Application:**
    Open your web browser and navigate to:
