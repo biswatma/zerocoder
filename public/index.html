@@ -397,7 +397,7 @@
 
         <div id="lmstudio-options-section" style="margin-bottom: 15px; display: none;">
           <label for="lmstudioNoThinkToggle" style="display: flex; align-items: center; font-weight: 600; cursor: pointer;">
-            <input type="checkbox" id="lmstudioNoThinkToggle" style="margin-right: 8px;">
+            <input type="checkbox" id="lmstudioNoThinkToggle" style="margin-right: 8px;" checked>
             Disable Model Thinking (appends /no_think)
           </label>
         </div>
@@ -420,6 +420,7 @@
       <textarea id="prompt" rows="5" placeholder="Describe your website idea..."></textarea>
       <div class="action-buttons-container">
         <button onclick="sendPrompt()" id="generateBtn"><span class="icon">✨</span> Generate</button>
+        <button onclick="applyEdit()" id="applyEditBtn" style="display:none;"><span class="icon">✏️</span> Apply Edit</button>
         <button onclick="downloadHtml()" id="downloadBtn"><span class="icon">💾</span> Download HTML</button>
         <button onclick="previewInNewTab()" id="previewBtn"><span class="icon">👁️</span> Preview in New Tab</button>
       </div>
@@ -449,6 +450,7 @@
     let editor;
     let lottieAnimation;
     let currentEventSource = null; // For cancelling the EventSource
+    let currentEditEventSource = null; // For cancelling edit EventSource
     let previewRefreshInterval = null; // For LM Studio iframe refresh
     let debounceTimer = null; // For debouncing iframe updates
     const DEBOUNCE_DELAY = 300; // milliseconds
@@ -685,32 +687,164 @@
     }
 
     function enableGenerateButton(errorOccurred = false) {
-      const generateButton = document.getElementById('generateBtn'); // Use ID
-      if (generateButton) {
-        generateButton.disabled = false;
-        generateButton.textContent = 'Generate';
-        generateButton.onclick = sendPrompt; // Reset to original function
-      }
-      document.getElementById('loaderContainer').style.display = 'none';
-      updateApiKeySectionVisibility(); // Ensure correct state after generation
-      
-      if (previewRefreshInterval) { 
-        clearInterval(previewRefreshInterval);
-        previewRefreshInterval = null;
-        console.log("[LM Studio Preview] Interval cleared in enableGenerateButton.");
-      }
+      const generateButton = document.getElementById('generateBtn');
+      const applyEditButton = document.getElementById('applyEditBtn');
 
-      // if(lottieAnimation) lottieAnimation.stop(); // Lottie is already hidden
+      // Common reset for loader, API key section, Lottie, etc.
+      document.getElementById('loaderContainer').style.display = 'none';
+      updateApiKeySectionVisibility();
       lottieContainerDiv.style.display = 'none';
 
-      if (errorOccurred) {
-        initialMessageDiv.style.display = 'flex'; 
-        previewIframe.style.display = 'none'; // Hide iframe on error
-      } else {
-        // previewIframe.style.display = 'block'; // Iframe is already visible
+      if (errorOccurred) { // Error or cancel during initial generation
+        if (generateButton) {
+          generateButton.disabled = false;
+          generateButton.textContent = 'Generate';
+          generateButton.onclick = sendPrompt;
+          generateButton.style.display = 'inline-flex';
+        }
+        if (applyEditButton) {
+          applyEditButton.style.display = 'none';
+        }
+        initialMessageDiv.style.display = 'flex';
+        previewIframe.style.display = 'none';
+      } else { // Success of initial generation
+        if (generateButton) {
+          generateButton.style.display = 'none'; // Hide Generate button
+        }
+        if (applyEditButton) {
+          applyEditButton.disabled = false;
+          applyEditButton.textContent = 'Apply Edit';
+          applyEditButton.onclick = applyEdit;
+          applyEditButton.style.display = 'inline-flex'; // Show Apply Edit button
+        }
         initialMessageDiv.style.display = 'none';
-        // Final update to ensure preview shows the very latest from editor if EOS processing changed it
-        if(editor) updatePreview(editor.getValue()); 
+        previewIframe.style.display = 'block'; // Ensure preview is visible
+        if(editor) updatePreview(editor.getValue());
+      }
+
+      if (previewRefreshInterval) {
+        clearInterval(previewRefreshInterval);
+        previewRefreshInterval = null;
+      }
+    }
+
+    async function applyEdit() {
+      console.log("applyEdit() called");
+
+      const selectedEngine = engineSelect.value;
+      const apiKey = apiKeyInput.value;
+
+      if (selectedEngine === 'gemini' && (!apiKey || !apiKey.trim())) {
+        alert('Please enter and save your Gemini API Key first.');
+        apiKeyInput.focus();
+        if (apiKeySection.style.display === 'none') toggleApiKeyVisibility();
+        return;
+      }
+
+      const editInstruction = document.getElementById('prompt').value;
+      const currentHtml = editor.getValue();
+
+      if (!editInstruction.trim()) {
+        alert('Please enter an edit instruction.');
+        return;
+      }
+      if (!currentHtml.trim()) {
+        alert('There is no HTML content to edit. Please generate content first.');
+        return;
+      }
+
+      const applyEditButton = document.getElementById('applyEditBtn');
+      if (!applyEditButton) {
+        console.error("Apply Edit button not found!");
+        return;
+      }
+
+      applyEditButton.textContent = 'Cancel Edit';
+      applyEditButton.onclick = cancelEdit;
+      applyEditButton.disabled = false;
+
+      document.getElementById('loaderContainer').style.display = 'block';
+
+      if (previewRefreshInterval) {
+        clearInterval(previewRefreshInterval);
+        previewRefreshInterval = null;
+      }
+
+      // Backend needs to be updated to handle `currentHtml` and `isEdit`.
+      // `prompt` query param becomes the `editInstruction`.
+      let apiUrl = `/api/generate?prompt=${encodeURIComponent(editInstruction)}&currentHtml=${encodeURIComponent(currentHtml)}&engine=${selectedEngine}&isEdit=true`;
+
+      if (selectedEngine === 'gemini') {
+        apiUrl += `&apiKey=${encodeURIComponent(apiKey)}`;
+      } else if (selectedEngine === 'lmstudio') {
+        apiUrl += `&lmstudio_no_think=${lmstudioNoThinkToggle.checked}`;
+      }
+
+      currentEditEventSource = new EventSource(apiUrl);
+      let fullHtmlContent = '';
+
+      currentEditEventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        if (data.htmlChunk) {
+          fullHtmlContent += data.htmlChunk; // Accumulate content
+          // editor.setValue is removed from here to prevent updating on each chunk during an edit.
+          // Preview will update once at EOS.
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            // updatePreview(fullHtmlContent); // Also defer preview update to EOS for edits
+          }, DEBOUNCE_DELAY); 
+        } else if (data.error) {
+          console.error('Error from server stream during edit:', data.error);
+          editor.setValue(editor.getValue() + `\n<!-- Server Error during edit: ${data.error} -->`);
+          if(currentEditEventSource) currentEditEventSource.close();
+          currentEditEventSource = null;
+          resetApplyEditButton(true);
+        } else if (data.event === "EOS") {
+          console.log("End of stream received for edit. Final content length:", fullHtmlContent.length);
+          if(currentEditEventSource) currentEditEventSource.close();
+          currentEditEventSource = null;
+          
+          // Server-side processGeneratedHtml should ensure clean HTML.
+          editor.setValue(fullHtmlContent); // Set final accumulated content once.
+          updatePreview(fullHtmlContent); // Update preview with final content.
+          resetApplyEditButton(false);
+        }
+      };
+
+      currentEditEventSource.onerror = function(err) {
+        console.error('EventSource failed during edit:', err);
+        editor.setValue(editor.getValue() + `\n<!-- Streaming connection error during edit. Please try again. -->`);
+        if(currentEditEventSource) currentEditEventSource.close();
+        currentEditEventSource = null;
+        resetApplyEditButton(true);
+      };
+    }
+
+    function cancelEdit() {
+      console.log("Cancel edit called.");
+      if (currentEditEventSource) {
+        currentEditEventSource.close();
+        currentEditEventSource = null;
+        console.log("Edit EventSource closed by cancel.");
+      }
+      resetApplyEditButton(true);
+    }
+
+    function resetApplyEditButton(errorOccurred = false) {
+      const applyEditButton = document.getElementById('applyEditBtn');
+      const generateButton = document.getElementById('generateBtn');
+
+      document.getElementById('loaderContainer').style.display = 'none';
+
+      if (applyEditButton) {
+        applyEditButton.disabled = false;
+        applyEditButton.textContent = 'Apply Edit';
+        applyEditButton.onclick = applyEdit;
+        applyEditButton.style.display = 'inline-flex';
+      }
+      if (generateButton) {
+        generateButton.style.display = 'none'; // Keep Generate button hidden
       }
     }
 
