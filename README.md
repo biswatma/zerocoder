@@ -19,6 +19,28 @@
 
 ZeroCoder is a web application that allows you to generate HTML websites based on text prompts using the Google Gemini API. It features a split UI with a prompt input and code editor on one side, and a live preview iframe on the other.
 
+# Zerocoder Projects
+
+This repository lists websites built using the **Zerocoder** tool.
+
+## Live Projects
+
+1. 🔗 [Resell Ticket (LM Studio)](https://biswatma.github.io/resellticket-lmstudio/)  
+   A minimalistic ticket reselling platform concept.
+
+2. 🔗 [TicketHub (Gemini)](https://biswatma.github.io/tickethub-gemini/)  
+   A user-friendly ticket booking interface developed with AI design assistance.
+
+3. 🔗 [SEO Audit Tool](https://biswatma.github.io/seoaudit/)  
+   A web-based SEO audit interface prototype.
+
+---
+
+These projects are built and deployed using GitHub Pages. Designed with the **Zerocoder** no-code/low-code tool for rapid prototyping.
+
+
+
+
 ## Features
 
 -   **AI-Powered Code Generation**: Uses Google Gemini to convert natural language prompts into HTML, CSS, and JavaScript code.
