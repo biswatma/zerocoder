@@ -24,15 +24,14 @@ ZeroCoder is a web application that allows you to generate HTML websites based o
 This repository lists websites built using the **Zerocoder** tool.
 
 ## Live Projects
-
-1. 🔗 [Resell Ticket (LM Studio)](https://biswatma.github.io/resellticket-lmstudio/)  
-   A minimalistic ticket reselling platform concept.
+1. 🔗 [SEO Audit Tool](https://biswatma.github.io/seoaudit/)  
+   A web-based SEO audit interface prototype.
 
 2. 🔗 [TicketHub (Gemini)](https://biswatma.github.io/tickethub-gemini/)  
    A user-friendly ticket booking interface developed with AI design assistance.
 
-3. 🔗 [SEO Audit Tool](https://biswatma.github.io/seoaudit/)  
-   A web-based SEO audit interface prototype.
+3. 🔗 [Resell Ticket (LM Studio)](https://biswatma.github.io/resellticket-lmstudio/)  
+   A minimalistic ticket reselling platform concept.
 
 ---
 
