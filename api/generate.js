@@ -1,5 +1,3 @@
-const axios = require('axios');
-
 // Helper function to perform the HTML stripping (copied from server.js logic)
 function processGeneratedHtml(combinedHtml) {
   if (!combinedHtml) return "";
@@ -100,71 +98,85 @@ module.exports = async (req, res) => {
       system_instruction: { parts: [{ text: systemPromptText }] }
     };
 
-    console.log(`[Vercel Function] Sending payload to Gemini.`);
-    const geminiResponse = await axios.post(geminiStreamUrl, geminiPayload, {
-      responseType: 'stream'
-    });
-    
-    let accumulatedData = '';
-    geminiResponse.data.on('data', (chunk) => {
-      accumulatedData += chunk.toString();
+    console.log(`[Vercel Function] Sending payload to Gemini via fetch.`);
+    const fetchResponse = await fetch(geminiStreamUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(geminiPayload),
     });
 
-    geminiResponse.data.on('end', () => {
-      console.log("[Vercel Function] Gemini stream ended. Total data length:", accumulatedData.length);
+    if (!fetchResponse.ok) {
+      let errorBody = 'Unknown fetch error';
       try {
-        const responsesArray = JSON.parse(accumulatedData);
-        let combinedHtml = "";
-        for (const responseObject of responsesArray) {
-          if (responseObject.candidates && responseObject.candidates[0] &&
-              responseObject.candidates[0].content && responseObject.candidates[0].content.parts &&
-              responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
-            combinedHtml += responseObject.candidates[0].content.parts[0].text;
-          } else if (responseObject.error) {
-            console.error("[Vercel Function] Error object in Gemini response array:", responseObject.error);
-            if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
-          }
-        }
-        
-        const finalHtml = processGeneratedHtml(combinedHtml);
-
-        if (finalHtml) {
-          if (!res.writableEnded) res.write(`data: ${JSON.stringify({ htmlChunk: finalHtml })}\n\n`);
-        } else if (responsesArray.length === 0 && !accumulatedData.includes("error")) {
-             console.log("[Vercel Function] Gemini response array was empty, no HTML content.");
-        }
+        errorBody = await fetchResponse.text(); // Try to get more details
+        console.error(`[Vercel Function] Gemini fetch failed: ${fetchResponse.status} ${fetchResponse.statusText}`, errorBody);
       } catch (e) {
-        console.error("[Vercel Function] Error parsing accumulated Gemini JSON response:", e.message);
-        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: "Failed to parse the full response from Gemini." })}\n\n`);
+         console.error(`[Vercel Function] Gemini fetch failed: ${fetchResponse.status} ${fetchResponse.statusText}. Could not read error body.`);
+      }
+      throw new Error(`Gemini API request failed with status ${fetchResponse.status}: ${errorBody}`);
+    }
+
+    if (!fetchResponse.body) {
+        throw new Error("Fetch response body is null.");
+    }
+
+    const reader = fetchResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedData = '';
+    let reading = true;
+
+    while(reading) {
+        const { done, value } = await reader.read();
+        if (done) {
+            reading = false;
+            break;
+        }
+        accumulatedData += decoder.decode(value, { stream: true });
+    }
+    // Append final chunk if decoder has leftovers
+    accumulatedData += decoder.decode(); 
+
+    console.log("[Vercel Function] Gemini stream ended via fetch. Total data length:", accumulatedData.length);
+    try {
+      // Gemini stream returns a JSON array as the full response body
+      const responsesArray = JSON.parse(accumulatedData);
+      let combinedHtml = "";
+      for (const responseObject of responsesArray) {
+        if (responseObject.candidates && responseObject.candidates[0] &&
+            responseObject.candidates[0].content && responseObject.candidates[0].content.parts &&
+            responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
+          combinedHtml += responseObject.candidates[0].content.parts[0].text;
+        } else if (responseObject.error) {
+          console.error("[Vercel Function] Error object in Gemini response array:", responseObject.error);
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
+        }
       }
       
-      if (!res.writableEnded) {
-        res.write('data: {"event": "EOS"}\n\n');
-        res.end();
-      }
-      console.log("[Vercel Function] Finished processing and sent EOS to client.");
-    });
+      const finalHtml = processGeneratedHtml(combinedHtml);
 
-    geminiResponse.data.on('error', (streamError) => {
-      console.error('[Vercel Function] Error event during Gemini stream pipe:', streamError);
-      if (!res.writableEnded) {
-        try {
-          res.write(`data: ${JSON.stringify({ error: streamError.message || 'Gemini stream pipe error event' })}\n\n`);
-          res.write('data: {"event": "EOS"}\n\n');
-          res.end();
-        } catch (e) {
-          console.error("[Vercel Function] Error writing error to client response after stream error:", e);
-          if (!res.writableEnded) res.end();
-        }
+      if (finalHtml) {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ htmlChunk: finalHtml })}\n\n`);
+      } else if (responsesArray.length === 0 && !accumulatedData.includes("error")) {
+           console.log("[Vercel Function] Gemini response array was empty, no HTML content.");
       }
-    });
+    } catch (e) {
+      console.error("[Vercel Function] Error parsing accumulated Gemini JSON response:", e.message);
+      console.error("[Vercel Function] Accumulated data (first 500 chars):", accumulatedData.substring(0, 500));
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: "Failed to parse the full response from Gemini." })}\n\n`);
+    }
+    
+    if (!res.writableEnded) {
+      res.write('data: {"event": "EOS"}\n\n');
+      res.end();
+    }
+    console.log("[Vercel Function] Finished processing and sent EOS to client.");
 
   } catch (err) {
-    console.error('[Vercel Function] Error setting up or during Gemini stream request:', err.isAxiosError ? err.message : err);
+    console.error('[Vercel Function] Error setting up or during Gemini fetch request/stream:', err);
     if (!res.writableEnded) {
-      const errorMessage = (err.response && err.response.data && err.response.data.error && err.response.data.error.message)
-                           ? err.response.data.error.message
-                           : (err.message || 'Server error during stream setup.');
+      const errorMessage = err.message || 'Server error during fetch/stream processing.';
       
       // Check if headers already sent to decide response format
       if (res.headersSent) {
@@ -172,15 +184,9 @@ module.exports = async (req, res) => {
         res.write('data: {"event": "EOS"}\n\n');
         res.end();
       } else {
-        // This case should be rare if flushHeaders() was called or first write happened.
-        // But if error is very early (e.g. before any res.write), send JSON.
-        // However, for EventSource, client expects text/event-stream.
-        // So, it's better to always try to send SSE if possible.
-        // If headers were NOT flushed by an explicit call, this might be the first write.
-        // Let's ensure SSE format for errors caught here too.
-        if (!res.headersSent) { // Double check, though flushHeaders() is called early in Express version
-             res.setHeader('Content-Type', 'text/event-stream'); // Ensure correct content type
-             // res.flushHeaders(); // Not available in raw res object here, Vercel handles.
+        // Ensure SSE format for errors caught here too.
+        if (!res.headersSent) { 
+             res.setHeader('Content-Type', 'text/event-stream'); 
         }
         res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
         res.write('data: {"event": "EOS"}\n\n');
