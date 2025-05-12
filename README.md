@@ -32,7 +32,8 @@ This repository lists websites built using the **Zerocoder** tool.
 
 3. 🔗 [Resell Ticket (LM Studio)](https://biswatma.github.io/resellticket-lmstudio/)  
    A minimalistic ticket reselling platform concept.
-
+4. 🔗 [AquaPure (Gemini) ](https://biswatma.github.io/aquapure/)  
+   A minimalistic ecom site for buying drinking water.
 ---
 
 These projects are built and deployed using GitHub Pages. Designed with the **Zerocoder** no-code/low-code tool for rapid prototyping.
