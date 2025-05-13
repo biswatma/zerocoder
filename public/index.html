@@ -197,7 +197,7 @@
         height: 100%;
     }
     
-    #prompt, #apiKeyInput { 
+    #prompt, #apiKeyInput, #openrouterApiKeyInput, #openrouterModelInput { 
       width: 100%; 
       margin-bottom: 15px; /* Increased spacing */
       padding: 12px; /* Increased padding */
@@ -234,6 +234,20 @@
     /* Keep specific button colors if needed, or unify */
     /* #downloadBtn { background-color: #28a745; } */
     /* #previewBtn { background-color: #17a2b8; } */
+
+    /* Style for the new edit icon buttons */
+    .edit-icon-button {
+        background: none;
+        border: none;
+        color: var(--text-color); /* Use themed text color */
+        cursor: pointer;
+        font-size: 1.2em; /* Adjust size as needed */
+        padding: 0 5px; /* Adjust padding */
+        transition: color 0.2s ease;
+    }
+    .edit-icon-button:hover {
+        color: var(--button-bg); /* Highlight on hover */
+    }
     
     #editor-container { 
       flex-grow: 1; 
@@ -392,6 +406,7 @@
           <select id="engineSelect" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 12px; background-color: var(--input-bg); color: var(--text-color); font-size: 1em; font-family: 'Open Sans', sans-serif; box-shadow: 0 2px 4px var(--shadow-color);">
             <option value="gemini" selected>Gemini API (Cloud)</option>
             <option value="lmstudio">LM Studio (Local)</option>
+            <option value="openrouter">OpenRouter</option> <!-- Added OpenRouter option -->
           </select>
         </div>
 
@@ -402,7 +417,28 @@
           </label>
         </div>
 
-        <div id="api-key-section">
+        <!-- OpenRouter Options Section -->
+        <div id="openrouter-options-section" class="api-key-section" style="margin-bottom: 15px; display: none;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label for="openrouterApiKeyInput" style="flex-shrink: 0;">OpenRouter API Key:</label>
+            <input type="password" id="openrouterApiKeyInput" placeholder="Enter your OpenRouter API Key" style="flex-grow: 1; margin-bottom: 0;">
+            <button class="edit-icon-button" onclick="editOpenrouterApiKey()" title="Edit API Key">✏️</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+            <label for="openrouterModelInput" style="flex-shrink: 0;">OpenRouter Model Name:</label>
+            <input type="text" id="openrouterModelInput" placeholder="e.g., openai/gpt-4o" style="flex-grow: 1; margin-bottom: 0;">
+            <button class="edit-icon-button" onclick="editOpenrouterModel()" title="Edit Model Name">✏️</button>
+          </div>
+          <div class="api-key-buttons" style="margin-top: 10px;">
+            <button onclick="saveOpenrouterKeyAndModel()">Save Key and Model</button>
+          </div>
+          <div id="openrouterStatus" style="margin-top: 8px; font-size: 0.8em; color: var(--text-color); opacity: 0.65; font-style: italic;"></div>
+          <div class="api-key-info" style="margin-top:10px;">
+            You can get your OpenRouter API key from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter API Keys</a>.
+          </div>
+        </div>
+
+        <div id="api-key-section" class="api-key-section">
         <div> <!-- This div wraps label and input -->
           <label for="apiKeyInput">Gemini API Key:</label>
           <input type="password" id="apiKeyInput" placeholder="Enter your Gemini API Key">
@@ -467,6 +503,7 @@
       require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs' }});
       require(['vs/editor/editor.main'], function() {
         loadApiKey(); // Load API key on init
+        loadOpenrouterKeyAndModel(); // Load OpenRouter key and model on init
         updateApiKeySectionVisibility(); // Initial visibility check
 
         if (engineSelect) {
@@ -537,25 +574,53 @@
 
 
       const selectedEngine = engineSelect.value;
-      const apiKey = apiKeyInput.value; // Already defined globally
-
-      if (selectedEngine === 'gemini' && (!apiKey || !apiKey.trim())) {
-        alert('Please enter and save your Gemini API Key first.');
-        apiKeyInput.focus();
-        // Ensure API key section is visible if Gemini is selected and key is missing
-        if (apiKeySection.style.display === 'none') {
-            toggleApiKeyVisibility(); // This will show it
-        }
-        return;
-      }
-
       const userPrompt = document.getElementById('prompt').value;
+
       if (!userPrompt.trim()) {
         console.log("Prompt is empty, alerting user."); // DEBUG LOG
         alert('Please enter a prompt.');
         return;
       }
       
+      let apiUrl = `/api/generate?prompt=${encodeURIComponent(userPrompt)}&engine=${selectedEngine}`;
+
+      if (selectedEngine === 'gemini') {
+        const apiKey = localStorage.getItem('geminiApiKey');
+        if (!apiKey || !apiKey.trim()) {
+          alert('Please enter and save your Gemini API Key first.');
+          document.getElementById('apiKeyInput').focus();
+          // Ensure API key section is visible if Gemini is selected and key is missing
+          if (document.getElementById('api-key-section').style.display === 'none') {
+              toggleApiKeyVisibility(); // This will show it
+          }
+          return;
+        }
+        apiUrl += `&apiKey=${encodeURIComponent(apiKey)}`;
+      } else if (selectedEngine === 'lmstudio') {
+        apiUrl += `&lmstudio_no_think=${lmstudioNoThinkToggle.checked}`;
+        // Start iframe refresh for LM Studio
+        previewRefreshInterval = setInterval(() => {
+          if (editor && editor.getValue().trim() !== "") { // Only refresh if there's content
+            console.log("[LM Studio Preview] Refreshing iframe...");
+            updatePreview(editor.getValue());
+          }
+        }, 5000); // Refresh every 5 seconds
+      } else if (selectedEngine === 'openrouter') { // Handle OpenRouter
+        const apiKey = localStorage.getItem('openrouterApiKey');
+        const model = localStorage.getItem('openrouterModel');
+        if (!apiKey || !apiKey.trim() || !model || !model.trim()) {
+          alert('Please enter and save your OpenRouter API Key and Model Name first.');
+          document.getElementById('openrouterApiKeyInput').focus();
+          // Ensure OpenRouter section is visible if selected and credentials are missing
+          if (document.getElementById('openrouter-options-section').style.display === 'none') {
+              toggleApiKeyVisibility(); // This will show it
+          }
+          return;
+        }
+        apiUrl += `&apiKey=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(model)}`;
+      }
+
+
       const generateButton = document.getElementById('generateBtn'); // Use ID for consistency
       if (!generateButton) {
         console.error("Generate button not found!"); // DEBUG LOG
@@ -569,6 +634,7 @@
 
       document.getElementById('loaderContainer').style.display = 'block'; 
       document.getElementById('api-key-section').style.display = 'none'; // Hide API key section
+      document.getElementById('openrouter-options-section').style.display = 'none'; // Hide OpenRouter section
       
       if (editor) {
         editor.setValue(''); 
@@ -583,20 +649,6 @@
       }
 
       console.log("About to create EventSource for prompt:", userPrompt, "with engine:", selectedEngine); // DEBUG LOG
-      
-      let apiUrl = `/api/generate?prompt=${encodeURIComponent(userPrompt)}&engine=${selectedEngine}`;
-      if (selectedEngine === 'gemini') {
-        apiUrl += `&apiKey=${encodeURIComponent(apiKey)}`;
-      } else if (selectedEngine === 'lmstudio') {
-        apiUrl += `&lmstudio_no_think=${lmstudioNoThinkToggle.checked}`;
-        // Start iframe refresh for LM Studio
-        previewRefreshInterval = setInterval(() => {
-          if (editor && editor.getValue().trim() !== "") { // Only refresh if there's content
-            console.log("[LM Studio Preview] Refreshing iframe...");
-            updatePreview(editor.getValue());
-          }
-        }, 5000); // Refresh every 5 seconds
-      }
       
       currentEventSource = new EventSource(apiUrl);
       let fullHtmlContent = '';
@@ -801,13 +853,36 @@
           currentEditEventSource = null;
           resetApplyEditButton(true);
         } else if (data.event === "EOS") {
-          console.log("End of stream received for edit. Final content length:", fullHtmlContent.length);
+          console.log("End of stream received.");
           if(currentEditEventSource) currentEditEventSource.close();
           currentEditEventSource = null;
+          if (previewRefreshInterval) {
+            clearInterval(previewRefreshInterval);
+            previewRefreshInterval = null;
+            console.log("[LM Studio Preview] Interval cleared on EOS.");
+          }
+
+          // Process fullHtmlContent to remove <think> block and add as comment
+          const thinkStartTag = "<think>";
+          const thinkEndTag = "</think>";
+          let processedHtml = fullHtmlContent;
+          let thinkComment = "";
+
+          const thinkStartIndex = fullHtmlContent.indexOf(thinkStartTag);
+          if (thinkStartIndex !== -1) {
+            const thinkEndIndex = fullHtmlContent.indexOf(thinkEndTag, thinkStartIndex);
+            if (thinkEndIndex !== -1) {
+              const thinkBlockContent = fullHtmlContent.substring(thinkStartIndex + thinkStartTag.length, thinkEndIndex).trim();
+              thinkComment = `<!-- \nMODEL THINKING PROCESS:\n${thinkBlockContent}\n-->\n`;
+              // Remove the think block and any leading/trailing newlines around it from the actual HTML
+              processedHtml = fullHtmlContent.substring(thinkEndIndex + thinkEndTag.length).trimStart();
+            }
+          }
           
-          // Server-side processGeneratedHtml should ensure clean HTML.
-          editor.setValue(fullHtmlContent); // Set final accumulated content once.
-          updatePreview(fullHtmlContent); // Update preview with final content.
+          // Ensure final update after processing think blocks
+          clearTimeout(debounceTimer); // Clear any pending debounce
+          editor.setValue(thinkComment + processedHtml);
+          updatePreview(thinkComment + processedHtml); // Final update to iframe
           resetApplyEditButton(false);
         }
       };
@@ -849,10 +924,12 @@
     }
 
     function updateApiKeySectionVisibility() {
+      console.log("toggleApiKeyVisibility() called"); // DEBUG LOG
+      const toggleButton = document.getElementById('toggleApiKeyBtn'); // Declare toggleButton
+      // apiKeySection is globally defined
       const selectedEngine = engineSelect.value;
-      const apiKeySectionDiv = document.getElementById('api-key-section'); 
-      const toggleButton = document.getElementById('toggleApiKeyBtn');
-      const lmstudioOptionsDiv = document.getElementById('lmstudio-options-section');
+      const apiKeySectionDiv = document.getElementById('api-key-section');
+      const openrouterOptionsDiv = document.getElementById('openrouter-options-section');
 
       if (selectedEngine === 'gemini') {
         if (localStorage.getItem('geminiApiKey')) {
@@ -861,16 +938,21 @@
             apiKeySectionDiv.style.display = 'block'; 
         }
         if (toggleButton) toggleButton.style.display = 'inline-flex'; 
-        if (lmstudioOptionsDiv) lmstudioOptionsDiv.style.display = 'none';
         
       } else if (selectedEngine === 'lmstudio') {
         apiKeySectionDiv.style.display = 'none';
         if (toggleButton) toggleButton.style.display = 'none'; 
         if (lmstudioOptionsDiv) lmstudioOptionsDiv.style.display = 'block';
+      } else if (selectedEngine === 'openrouter') { // Handle OpenRouter
+        if (localStorage.getItem('openrouterApiKey') && localStorage.getItem('openrouterModel')) {
+            openrouterOptionsDiv.style.display = 'none';
+        } else {
+            openrouterOptionsDiv.style.display = 'block';
+        }
+        if (toggleButton) toggleButton.style.display = 'inline-flex';
       } else { // Other engines, if any in future
         apiKeySectionDiv.style.display = 'none';
-        if (toggleButton) toggleButton.style.display = 'none';
-        if (lmstudioOptionsDiv) lmstudioOptionsDiv.style.display = 'none';
+        if (toggleButton) openrouterOptionsDiv.style.display = 'none'; // Corrected: use openrouterOptionsDiv here
       }
     }
 
@@ -969,17 +1051,109 @@
       console.log('API Key cleared.');
     }
 
+    function saveOpenrouterKeyAndModel() {
+      const apiKeyInput = document.getElementById('openrouterApiKeyInput');
+      const modelInput = document.getElementById('openrouterModelInput');
+      const statusDiv = document.getElementById('openrouterStatus');
+
+      const apiKey = apiKeyInput.value.trim();
+      const model = modelInput.value.trim();
+
+      if (apiKey && model) {
+        localStorage.setItem('openrouterApiKey', apiKey);
+        localStorage.setItem('openrouterModel', model);
+        apiKeyInput.value = apiKey; // Set value explicitly after trim
+        modelInput.value = model; // Set value explicitly after trim
+        apiKeyInput.type = 'password'; // Mask key after saving
+        apiKeyInput.disabled = true; // Disable input
+        modelInput.disabled = true; // Disable input
+        statusDiv.textContent = "OpenRouter credentials securely stored in your browser's local cache.";
+        document.getElementById('openrouter-options-section').style.display = 'none';
+        console.log('OpenRouter Key and Model saved.');
+      } else {
+        alert('Please enter both OpenRouter API Key and Model Name to save.');
+      }
+    }
+
+    function loadOpenrouterKeyAndModel() {
+      const savedKey = localStorage.getItem('openrouterApiKey');
+      const savedModel = localStorage.getItem('openrouterModel');
+      const apiKeyInput = document.getElementById('openrouterApiKeyInput');
+      const modelInput = document.getElementById('openrouterModelInput');
+      const statusDiv = document.getElementById('openrouterStatus');
+      const openrouterOptionsDiv = document.getElementById('openrouter-options-section');
+
+      if (savedKey && savedModel) {
+        apiKeyInput.value = savedKey;
+        apiKeyInput.type = 'password';
+        modelInput.value = savedModel;
+        apiKeyInput.disabled = true; // Disable input
+        modelInput.disabled = true; // Disable input
+        statusDiv.textContent = "OpenRouter credentials securely stored in your browser's local cache.";
+        // No need to hide the section here, updateApiKeySectionVisibility handles it
+      } else {
+        apiKeyInput.value = ''; // Clear value if not saved
+        modelInput.value = ''; // Clear value if not saved
+        apiKeyInput.type = 'text';
+        apiKeyInput.disabled = false; // Enable input
+        modelInput.disabled = false; // Enable input
+        statusDiv.textContent = 'No OpenRouter credentials found. Please enter and save them.';
+        // No need to show the section here, updateApiKeySectionVisibility handles it
+      }
+       updateApiKeySectionVisibility(); // Call this to ensure correct section is shown/hidden
+    }
+
+    function editOpenrouterApiKey() {
+        const apiKeyInput = document.getElementById('openrouterApiKeyInput');
+        const statusDiv = document.getElementById('openrouterStatus');
+        localStorage.removeItem('openrouterApiKey');
+        apiKeyInput.value = '';
+        apiKeyInput.type = 'text';
+        apiKeyInput.disabled = false;
+        apiKeyInput.focus();
+        statusDiv.textContent = 'OpenRouter API Key cleared. Enter a new key and save.';
+        console.log('OpenRouter API Key cleared for editing.');
+        // Ensure the OpenRouter section is visible
+        document.getElementById('openrouter-options-section').style.display = 'block';
+    }
+
+    function editOpenrouterModel() {
+        const modelInput = document.getElementById('openrouterModelInput');
+        const statusDiv = document.getElementById('openrouterStatus');
+        localStorage.removeItem('openrouterModel');
+        modelInput.value = '';
+        modelInput.disabled = false;
+        modelInput.focus();
+        statusDiv.textContent = 'OpenRouter Model Name cleared. Enter a new model and save.';
+        console.log('OpenRouter Model Name cleared for editing.');
+         // Ensure the OpenRouter section is visible
+        document.getElementById('openrouter-options-section').style.display = 'block';
+    }
+
+
     function toggleApiKeyVisibility() {
+      console.log("toggleApiKeyVisibility() called"); // DEBUG LOG
       // apiKeySection is globally defined
-      if (engineSelect.value === 'gemini') { // Only toggle for Gemini
-        if (apiKeySection.style.display === 'none' || apiKeySection.style.display === '') {
-          apiKeySection.style.display = 'block';
+      const selectedEngine = engineSelect.value;
+      const apiKeySectionDiv = document.getElementById('api-key-section');
+      const openrouterOptionsDiv = document.getElementById('openrouter-options-section');
+
+      if (selectedEngine === 'gemini') {
+        if (apiKeySectionDiv.style.display === 'none' || apiKeySectionDiv.style.display === '') {
+          apiKeySectionDiv.style.display = 'block';
         } else {
-          apiKeySection.style.display = 'none';
+          apiKeySectionDiv.style.display = 'none';
+        }
+      } else if (selectedEngine === 'openrouter') {
+         if (openrouterOptionsDiv.style.display === 'none' || openrouterOptionsDiv.style.display === '') {
+          openrouterOptionsDiv.style.display = 'block';
+        } else {
+          openrouterOptionsDiv.style.display = 'none';
         }
       } else {
         // For LM Studio, ensure it's hidden if this function is somehow called
-        apiKeySection.style.display = 'none';
+        apiKeySectionDiv.style.display = 'none';
+        if (openrouterOptionsDiv) openrouterOptionsDiv.style.display = 'none';
       }
     }
 

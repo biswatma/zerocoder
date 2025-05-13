@@ -9,11 +9,11 @@ const path = require('path'); // Added for serving static files
 function processGeneratedHtml(combinedHtml) {
   if (!combinedHtml) return "";
   console.log("[Server] Original combinedHtml (first 500 chars):", combinedHtml.substring(0, 500) + (combinedHtml.length > 500 ? "..." : ""));
-  
+
   let finalHtml = "";
   const htmlRegex = /<(!DOCTYPE html|html)[\s\S]*?<\/html>/i;
   const match = combinedHtml.match(htmlRegex);
-  
+
   if (match && match[0]) {
     finalHtml = match[0];
     console.log("[Server] HTML extracted using primary regex. Length:", finalHtml.length);
@@ -37,7 +37,7 @@ function processGeneratedHtml(combinedHtml) {
         contentToTest = combinedHtml.trim();
       }
     }
-    
+
     const secondMatch = contentToTest.trim().match(htmlRegex);
     if (secondMatch && secondMatch[0]) {
         finalHtml = secondMatch[0];
@@ -53,7 +53,7 @@ function processGeneratedHtml(combinedHtml) {
         console.log("[Server] Using content (post-fence check) as it starts like HTML. Length:", finalHtml.length);
     } else {
         console.error("[Server] Failed to extract clean HTML even after fallback. Sending original combined (but trimmed) content.");
-        finalHtml = combinedHtml.trim(); 
+        finalHtml = combinedHtml.trim();
     }
   }
   return finalHtml.trim();
@@ -76,20 +76,22 @@ app.get('/api/generate', async (req, res) => {
   console.log("[SERVER DEBUG] /api/generate ROUTE HANDLER STARTED (for local server)!");
   console.log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n\n");
 
-  const prompt = req.query.prompt; // This will be the edit instruction if isEdit is true
-  const apiKey = req.query.apiKey; // Get API key from query parameter
+  const prompt = req.query.prompt; // This will be the edit instruction if isEdit
   const engine = req.query.engine || 'gemini'; // Default to gemini
   const isEdit = req.query.isEdit === 'true';
   const currentHtml = req.query.currentHtml; // Existing HTML for edit mode
 
+  // Retrieve OpenRouter credentials if engine is openrouter
+  const openrouterApiKey = req.query.apiKey;
+  const openrouterModel = req.query.model;
+
+  console.log("[SERVER DEBUG] Received engine:", engine); // Log the received engine
+  console.log("[SERVER DEBUG] Received query parameters:", req.query); // Log all query parameters
+
+
   if (!prompt) {
     console.log("[SERVER DEBUG] Prompt is missing, sending 400 error.");
     return res.status(400).json({ error: "Prompt is required" });
-  }
-  // API Key is only required for Gemini
-  if (engine === 'gemini' && !apiKey) {
-    console.log("[SERVER DEBUG] API Key is missing for Gemini, sending 400 error.");
-    return res.status(400).json({ error: "API Key is required for Gemini" });
   }
 
   // Set SSE headers
@@ -106,200 +108,164 @@ app.get('/api/generate', async (req, res) => {
     if (engine === 'lmstudio') {
       userContentForModel = `Instruction: "${prompt}"\n\nCarefully update the following HTML based *only* on the instruction above. Preserve all unchanged parts. Output the complete modified HTML only.\n\nHTML to modify:\n---\n${currentHtml}\n---`;
     } else { // For Gemini or other engines
-      userContentForModel = `Existing HTML:\n---\n${currentHtml}\n---\nEdit Instruction:\n${prompt}`;
+      userContentForModel = `Existing HTML:\n---\n${currentHtml}\n-\nEdit Instruction:\n${prompt}`;
     }
-    console.log(`[Server] Edit mode. Combined content for model (first 200 chars): ${userContentForModel.substring(0,200)}...`);
+    console.log(`[SERVER DEBUG] Edit mode. Combined content for model (first 200 chars): ${userContentForModel.substring(0,200)}...`);
   } else {
-    console.log(`[Server] New generation mode. Prompt: "${prompt}"`);
+    console.log(`[SERVER DEBUG] New generation mode. Prompt: "${prompt}"`);
   }
 
-  if (engine === 'lmstudio') {
-    const lmstudioNoThink = req.query.lmstudio_no_think === 'true';
-    let finalPayloadForLmStudio = userContentForModel; // Already incorporates edit logic
-    if (lmstudioNoThink) {
-      finalPayloadForLmStudio = `${userContentForModel} /no_think`; // Append /no_think if needed
-      console.log(`[Server] LM Studio 'no_think' is enabled. Modified payload for LM Studio: "${finalPayloadForLmStudio.substring(0,100)}..."`);
-    } else {
-      console.log(`[Server] LM Studio 'no_think' is disabled. Original payload for LM Studio: "${finalPayloadForLmStudio.substring(0,100)}..."`);
-    }
-    console.log(`[Server] Attempting to stream from LM Studio with payload (first 100 chars): "${finalPayloadForLmStudio.substring(0,100)}..."`);
-    const controller = new AbortController(); // Create an AbortController
+  try {
+    let apiUrl;
+    let fetchOptions = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    };
 
-    res.on('close', () => {
-      console.log('[Server] Client closed connection. Aborting LM Studio request.');
-      controller.abort(); // Abort the axios request if client disconnects
-    });
+    if (engine === 'gemini') {
+      const apiKey = req.query.apiKey; // Get API key from query parameter
+      if (!apiKey) {
+        console.log("[SERVER DEBUG] API Key is missing for Gemini, sending 400 error.");
+        return res.status(400).json({ error: "API Key is required for Gemini" });
+      }
 
-    try {
-      const lmStudioUrl = process.env.LMSTUDIO_URL || 'http://localhost:1234/v1/chat/completions';
-      const lmStudioPayload = {
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:streamGenerateContent?key=${apiKey}`;
+      console.log(`[SERVER DEBUG] Attempting to stream from Gemini for prompt: "${prompt}"`);
+
+      fetchOptions.body = JSON.stringify({
+        contents: [{
+          parts: [{ text: userContentForModel }]
+        }],
+        system_instruction: {
+          parts: [{ text: systemPromptText }]
+        }
+      });
+
+    } else if (engine === 'lmstudio') {
+      const lmstudioNoThink = req.query.lmstudio_no_think === 'true';
+      let finalPayloadForLmStudio = userContentForModel; // Already incorporates edit logic
+      if (lmstudioNoThink) {
+        finalPayloadForLmStudio = `${userContentForModel} /no_think`; // Append /no_think if needed
+        console.log(`[SERVER DEBUG] LM Studio 'no_think' is enabled. Modified payload for LM Studio: "${finalPayloadForLmStudio.substring(0,100)}..."`);
+      } else {
+        console.log(`[SERVER DEBUG] LM Studio 'no_think' is disabled. Original payload for LM Studio: "${finalPayloadForLmStudio.substring(0,100)}..."`);
+      }
+      console.log(`[SERVER DEBUG] Attempting to stream from LM Studio with payload (first 100 chars): "${finalPayloadForLmStudio.substring(0,100)}..."`);
+
+      apiUrl = process.env.LMSTUDIO_URL || 'http://localhost:1234/v1/chat/completions';
+      fetchOptions.body = JSON.stringify({
         model: process.env.LMSTUDIO_MODEL || undefined, // Optional: specify model if not pre-loaded
         messages: [
           { role: "system", content: systemPromptText },
           { role: "user", content: finalPayloadForLmStudio }
         ],
         stream: true
-      };
-
-      const lmStudioResponse = await axios.post(lmStudioUrl, lmStudioPayload, {
-        responseType: 'stream',
-        signal: controller.signal // Pass the abort signal to axios
       });
 
-      let buffer = '';
-      lmStudioResponse.data.on('data', (chunk) => {
-        buffer += chunk.toString();
-        let boundary;
-        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-          const dataLine = buffer.substring(0, boundary);
-          buffer = buffer.substring(boundary + 2);
-          if (dataLine.startsWith('data: ')) {
-            const jsonData = dataLine.substring(6);
-            if (jsonData.trim() === '[DONE]') {
-              console.log("[Server] LM Studio stream [DONE] received.");
-              // EOS is sent after this loop or in 'end' event
-              continue; 
-            }
-            try {
-              const parsed = JSON.parse(jsonData);
-              if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
-                const textChunk = parsed.choices[0].delta.content;
-                console.log("[Server] Sending LM Studio text chunk to client:", textChunk.substring(0,100) + "...");
-                res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
-              }
-              if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason === 'stop') {
-                console.log("[Server] LM Studio stream finished (finish_reason: stop).");
-                // EOS will be sent by 'end' event handler
-              }
-            } catch (e) {
-              console.warn('[Server] Error parsing LM Studio JSON chunk:', jsonData, e.message);
-            }
-          }
-        }
-      });
+    } else if (engine === 'openrouter') { // Handle OpenRouter
+      const apiKey = req.query.apiKey;
+      const model = req.query.model;
 
-      lmStudioResponse.data.on('end', () => {
-        console.log("[Server] LM Studio stream ended.");
-        if (buffer.trim().length > 0) { // Process any remaining data in buffer
-            if (buffer.startsWith('data: ')) {
-                const jsonData = buffer.substring(6);
-                if (jsonData.trim() !== '[DONE]') {
-                    try {
-                        const parsed = JSON.parse(jsonData);
-                        if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
-                            const textChunk = parsed.choices[0].delta.content;
-                            console.log("[Server] Sending final LM Studio text chunk to client:", textChunk.substring(0,100) + "...");
-                            res.write(`data: ${JSON.stringify({ htmlChunk: textChunk })}\n\n`);
-                        }
-                    } catch (e) {
-                        console.warn('[Server] Error parsing final LM Studio JSON chunk:', jsonData, e.message);
-                    }
-                }
-            }
-        }
-        res.write('data: {"event": "EOS"}\n\n');
-        res.end();
-        console.log("[Server] Finished processing LM Studio stream and sent EOS to client.");
-      });
-
-      lmStudioResponse.data.on('error', (streamError) => {
-        console.error('[Server] Error event during LM Studio stream pipe:', streamError);
-        if (!res.writableEnded) {
-          try {
-            res.write(`data: ${JSON.stringify({ error: streamError.message || 'LM Studio stream pipe error event' })}\n\n`);
-            res.write('data: {"event": "EOS"}\n\n');
-            res.end();
-          } catch (e) {
-            console.error("[Server] Error writing error to client response after LM Studio stream error:", e);
-            if (!res.writableEnded) res.end();
-          }
-        }
-      });
-
-    } catch (err) {
-      if (err.name === 'AbortError' || (axios.isCancel && axios.isCancel(err))) {
-        console.log('[Server] LM Studio request aborted by client.');
-        // Ensure the response to the client is properly ended if not already.
-        if (!res.writableEnded) {
-          res.write('data: {"event": "EOS", "reason": "aborted"}\n\n');
-          res.end();
-        }
-        return; // Stop further processing for this aborted request
+      if (!apiKey || !apiKey.trim() || !model || !model.trim()) {
+        console.log("[SERVER DEBUG] OpenRouter API Key or Model is missing.");
+        return res.status(400).json({ error: "OpenRouter API Key and Model are required" });
       }
 
-      console.error('[Server] Error setting up or during LM Studio stream request:', err.isAxiosError ? err.message : err);
-      let errorMessage = 'Failed to connect to LM Studio API for streaming.';
-      if (err.response && err.response.data) {
-        let errorData = err.response.data;
-         if (errorData instanceof require('stream').Readable) {
-            let chunks = [];
-            errorData.on('data', chunk => chunks.push(chunk));
-            errorData.on('end', () => {
-                const errorString = Buffer.concat(chunks).toString();
-                console.error("[Server] LM Studio error response (streamed):", errorString);
-                try {
-                    const parsedError = JSON.parse(errorString);
-                    errorMessage = parsedError.error ? (parsedError.error.message || errorString) : errorString;
-                } catch (parseErr) {
-                    errorMessage = errorString;
-                }
-                if (!res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
-                    res.write('data: {"event": "EOS"}\n\n');
-                    res.end();
-                }
-            });
-            return; // Handled by stream events
-        } else {
-            console.error("[Server] LM Studio error response (data):", errorData);
-            if (errorData.error && errorData.error.message) {
-                errorMessage = errorData.error.message;
-            } else if (typeof errorData === 'string') {
-                errorMessage = errorData;
-            } else if (err.message) {
-                errorMessage = err.message;
-            }
-        }
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
-        res.write('data: {"event": "EOS"}\n\n');
-        res.end();
-      }
+      apiUrl = "https://openrouter.ai/api/v1/chat/completions";
+      console.log(`[SERVER DEBUG] Attempting to stream from OpenRouter for prompt: "${prompt}" with model: "${model}"`);
+
+      fetchOptions.headers["Authorization"] = `Bearer ${apiKey}`;
+      fetchOptions.headers["HTTP-Referer"] = req.headers.referer || "https://zerocoder.vercel.app"; // Use referrer or a default
+      fetchOptions.headers["X-Title"] = "ZeroCoder"; // Site title
+
+      fetchOptions.body = JSON.stringify({
+        model: model,
+        messages: [
+          { role: "system", content: systemPromptText },
+          { role: "user", content: userContentForModel }
+        ],
+        stream: true
+      });
+
+    } else {
+      console.log("[SERVER DEBUG] Invalid engine specified.");
+      return res.status(400).json({ error: "Invalid generation engine specified" });
     }
 
-  } else { // Default to Gemini
-    try {
-      // Using the API key passed from the client
-      const geminiStreamUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:streamGenerateContent?key=${apiKey}`;
-      
-      const geminiPayload = {
-        contents: [{ 
-          parts: [{ text: userContentForModel }]  // Use userContentForModel which includes edits if applicable
-        }],
-        system_instruction: {         // Official field for system instructions
-          parts: [{ text: systemPromptText }]
+    console.log(`[SERVER DEBUG] Sending payload to ${engine} via fetch.`);
+    const fetchResponse = await fetch(apiUrl, fetchOptions);
+
+    if (!fetchResponse.ok) {
+      let errorBody = 'Unknown fetch error';
+      try {
+        errorBody = await fetchResponse.text(); // Try to get more details
+        console.error(`[SERVER DEBUG] ${engine} fetch failed: ${fetchResponse.status} ${fetchResponse.statusText}`, errorBody);
+      } catch (e) {
+         console.error(`[SERVER DEBUG] ${engine} fetch failed: ${fetchResponse.status} ${fetchResponse.statusText}. Could not read error body.`);
+      }
+      throw new Error(`${engine} API request failed with status ${fetchResponse.status}: ${errorBody}`);
+    }
+
+    if (!fetchResponse.body) {
+        throw new Error("Fetch response body is null.");
+    }
+
+    const reader = fetchResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedData = '';
+
+    while(true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
         }
-      };
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedData += chunk;
 
-      console.log(`[Server] Attempting to stream from Gemini. Payload (first 100 chars of user content): "${userContentForModel.substring(0,100)}..."`);
-      const geminiResponse = await axios.post(geminiStreamUrl, geminiPayload, {
-        responseType: 'stream'
-      });
-      
-      let jsonBuffer = '';
+        // Process chunks for SSE for OpenRouter and LM Studio
+        if (engine === 'openrouter' || engine === 'lmstudio') {
+             const messages = accumulatedData.split('\n\n');
+             accumulatedData = messages.pop(); // Keep the last incomplete message
 
-      geminiResponse.data.on('data', (chunk) => {
-        jsonBuffer += chunk.toString();
-        // Removed problematic parsing from here; accumulation only.
-      });
-
-      geminiResponse.data.on('end', () => {
-        console.log("[Server] Gemini stream ended. Accumulated data length:", jsonBuffer.length);
+             for (const message of messages) {
+                 if (message.startsWith('data: ')) {
+                     const jsonString = message.substring(6);
+                     if (jsonString === '[DONE]') {
+                         // Handle end of stream for OpenRouter/LM Studio
+                         if (!res.writableEnded) {
+                             res.write('data: {"event": "EOS"}\n\n');
+                             res.end();
+                         }
+                         console.log(`[SERVER DEBUG] ${engine} stream ended via SSE [DONE].`);
+                         return; // Exit the function after sending EOS
+                     }
+                     try {
+                         const data = JSON.parse(jsonString);
+                         // Process the chunk data and send to client
+                         if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
+                             const htmlChunk = data.choices[0].delta.content;
+                             if (!res.writableEnded) res.write(`data: ${JSON.stringify({ htmlChunk: htmlChunk })}\n\n`);
+                         } else if (data.error) {
+                             console.error(`[SERVER DEBUG] Error object in ${engine} stream chunk:`, data.error);
+                             if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: data.error.message || `Error in ${engine} stream chunk` })}\n\n`);
+                         }
+                     } catch (e) {
+                         console.error(`[SERVER DEBUG] Error parsing ${engine} stream chunk JSON:`, e.message);
+                         console.error(`[SERVER DEBUG] Chunk content (first 200 chars):`, jsonString.substring(0, 200));
+                         if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: `Failed to parse ${engine} stream chunk.` })}\n\n`);
+                     }
+                 }
+             }
+        }
+    }
+    // Append final chunk if decoder has leftovers (for Gemini)
+    if (engine === 'gemini') {
+        accumulatedData += decoder.decode();
+        console.log("[SERVER DEBUG] Gemini stream ended via fetch. Total data length:", accumulatedData.length);
         try {
-          const responsesArray = JSON.parse(jsonBuffer);
+          const responsesArray = JSON.parse(accumulatedData);
           let combinedHtml = "";
           for (const responseObject of responsesArray) {
             if (responseObject.candidates && responseObject.candidates[0] &&
@@ -307,86 +273,74 @@ app.get('/api/generate', async (req, res) => {
                 responseObject.candidates[0].content.parts[0] && responseObject.candidates[0].content.parts[0].text) {
               combinedHtml += responseObject.candidates[0].content.parts[0].text;
             } else if (responseObject.error) {
-              console.error("[Server] Error object in Gemini response array:", responseObject.error);
+              console.error("[SERVER DEBUG] Error object in Gemini response array:", responseObject.error);
               if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: responseObject.error.message || 'Error in Gemini response object' })}\n\n`);
             }
           }
-          
+
           const finalHtml = processGeneratedHtml(combinedHtml); // Use the helper function
 
           if (finalHtml) {
-            console.log("[Server] Sending processed Gemini HTML to client. Length:", finalHtml.length);
+            console.log("[SERVER DEBUG] Sending processed Gemini HTML to client. Length:", finalHtml.length);
             if (!res.writableEnded) res.write(`data: ${JSON.stringify({ htmlChunk: finalHtml })}\n\n`);
-          } else if (responsesArray.length === 0 && !jsonBuffer.includes("error")) {
-               console.log("[Server] Gemini response array was empty, no HTML content from buffer.");
+          } else if (responsesArray.length === 0 && !accumulatedData.includes("error")) {
+               console.log("[SERVER DEBUG] Gemini response array was empty, no HTML content from buffer.");
           }
         } catch (e) {
-          console.error("[Server] Error parsing accumulated Gemini JSON response from buffer:", e.message);
-          console.error("[Server] Buffer content that failed to parse (first 500 chars):", jsonBuffer.substring(0, 500));
+          console.error("[SERVER DEBUG] Error parsing accumulated Gemini JSON response from buffer:", e.message);
+          console.error("[SERVER DEBUG] Buffer content that failed to parse (first 500 chars):", accumulatedData.substring(0, 500));
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: "Failed to parse the full response from Gemini." })}\n\n`);
         }
-        
-        if (!res.writableEnded) res.write('data: {"event": "EOS"}\n\n');
-        res.end();
-        console.log("[Server] Finished processing Gemini stream and sent EOS to client.");
-      });
+    }
 
-      geminiResponse.data.on('error', (streamError) => { 
-        console.error('[Server] Error event during Gemini stream pipe:', streamError);
-        if (!res.writableEnded) {
-          try {
-            res.write(`data: ${JSON.stringify({ error: streamError.message || 'Gemini stream pipe error event' })}\n\n`);
-            res.write('data: {"event": "EOS"}\n\n');
-            res.end();
-          } catch (e) {
-            console.error("[Server] Error writing error to client response after stream error:", e);
-            if (!res.writableEnded) res.end(); 
-          }
+
+    if (!res.writableEnded) {
+      res.write('data: {"event": "EOS"}\n\n');
+      res.end();
+    }
+    console.log("[SERVER DEBUG] Finished processing and sent EOS to client.");
+
+  } catch (err) {
+    console.error('[SERVER DEBUG] Error setting up or during fetch request/stream:', err.isAxiosError ? err.message : err);
+    let errorMessage = 'Server error during fetch/stream processing.';
+    if (err.response && err.response.data) {
+        let errorData = err.response.data;
+        if (errorData instanceof require('stream').Readable) {
+            let chunks = [];
+            errorData.on('data', chunk => chunks.push(chunk));
+            errorData.on('end', () => {
+                const errorString = Buffer.concat(chunks).toString();
+                console.error("[SERVER DEBUG] API error response (streamed):", errorString);
+                try {
+                    const parsedError = JSON.parse(errorString);
+                    errorMessage = parsedError.error ? (parsedError.error.message || errorString) : errorString;
+                } catch (parseErr) {
+                    errorMessage = errorString;
+                }
+                if (!res.writableEnded) {
+                  res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+                  res.write('data: {"event": "EOS"}\n\n');
+                  res.end();
+                }
+            });
+            return;
+        } else {
+             console.error("[SERVER DEBUG] API error response (data):", errorData);
+             if(errorData.error && errorData.error.message) {
+                 errorMessage = errorData.error.message;
+             } else if (typeof errorData === 'string') {
+                 errorMessage = errorData;
+             } else if (err.message) {
+                 errorMessage = err.message;
+             }
         }
-      });
-
-    } catch (err) {
-      console.error('[Server] Error setting up or during Gemini stream request:', err.isAxiosError ? err.message : err);
-      let errorMessage = 'Failed to connect to Gemini API for streaming.';
-      if (err.response && err.response.data) { 
-          let errorData = err.response.data;
-          if (errorData instanceof require('stream').Readable) { 
-              let chunks = [];
-              errorData.on('data', chunk => chunks.push(chunk));
-              errorData.on('end', () => {
-                  const errorString = Buffer.concat(chunks).toString();
-                  console.error("[Server] Gemini error response (streamed):", errorString);
-                  try {
-                      const parsedError = JSON.parse(errorString);
-                      errorMessage = parsedError.error ? (parsedError.error.message || errorString) : errorString;
-                  } catch (parseErr) {
-                      errorMessage = errorString;
-                  }
-                  if (!res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
-                    res.write('data: {"event": "EOS"}\n\n');
-                    res.end();
-                  }
-              });
-              return; 
-          } else {
-               console.error("[Server] Gemini error response (data):", errorData);
-               if(errorData.error && errorData.error.message) {
-                   errorMessage = errorData.error.message;
-               } else if (typeof errorData === 'string') {
-                   errorMessage = errorData;
-               } else if (err.message) {
-                   errorMessage = err.message;
-               }
-          }
-      } else if (err.message) {
-          errorMessage = err.message;
-      }
-      if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
-        res.write('data: {"event": "EOS"}\n\n'); 
-        res.end();
-      }
+    } else if (err.message) {
+        errorMessage = err.message;
+    }
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+      res.write('data: {"event": "EOS"}\n\n');
+      res.end();
     }
   }
 });
